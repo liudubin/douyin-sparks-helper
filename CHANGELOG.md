@@ -1,5 +1,12 @@
 # 抖音AI续火花助手 更新日志
 
+## v2.18.1 (2026-10-19)
+
+- 设置页删掉整张「插件授权」卡片(授权状态 / 专属 ID / 设备标识三行)。
+- 头部删掉「ID: 待分配」徽标及其主题色重着色、`authCode` 相关回调。
+- 一并移除 `SparksLicenseChangedNotification` 观察者与 `refreshAuthCode`(打开面板时的授权刷新)。
+- `SparksPanel.m` 不再 import `SparksLicense.h` —— 面板里已无任何授权痕迹。
+
 ## v2.18.0 — 移除联网授权校验 (2026-10-19)
 
 - `SparksLicense` 改为纯本地实现:不连后台、不验签,`isActive` 恒为 YES,引擎里所有

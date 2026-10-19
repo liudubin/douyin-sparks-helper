@@ -1,4 +1,3 @@
-#import "SparksLicense.h"
 //
 //  SparksPanel.m
 //  悬浮球 + 液态玻璃卡片面板 v2.0.0
@@ -1046,7 +1045,6 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
 @property (nonatomic, strong) UIView *panelRoot;
 @property (nonatomic, strong) UIView *backgroundTapView;
 @property (nonatomic, strong) UIView *donateView;
-@property (nonatomic, weak) UILabel *headerIdLabel;   // 主题色实时重着色用
 @property (nonatomic, copy) NSString *detailKey;      // 目标单独设置页:正在查看的目标 key(空=列表)
 @end
 
@@ -1141,8 +1139,6 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
 - (void)setup {
     dispatch_async(dispatch_get_main_queue(), ^{
         [self createBall];
-        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(licenseChanged:)
-            name:SparksLicenseChangedNotification object:nil];
         __weak typeof(self) ws = self;
         [SparksEngine shared].onStateChange = ^{
             dispatch_async(dispatch_get_main_queue(), ^{
@@ -1613,7 +1609,6 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
     // 打开面板自动隐藏悬浮球
     self.ballWrapper.hidden = YES;
     [self setBallGifPlaying:NO];
-    [self refreshAuthCode];   // 专属ID:向授权后台取(限频10分钟)
 
     SparksConfig *cfg = [SparksConfig shared];
     CGFloat d = 0.35 / MAX(0.3, cfg.animSpeed);
@@ -1793,22 +1788,7 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
     [close addTarget:self action:@selector(closePanel) forControlEvents:UIControlEventTouchUpInside];
     [nameL.trailingAnchor constraintLessThanOrEqualToAnchor:close.leadingAnchor constant:-8].active = YES;
 
-    // ID 徽标:授权后台分配的专属ID(SPK-xxx),与昵称同行,主题色等宽字体
-    UILabel *idL = nil;
-    {
-        idL = [[UILabel alloc] init];
-        idL.text = cfg.authCode.length ? [NSString stringWithFormat:@"ID: %@", cfg.authCode] : @"ID: 待分配";
-        idL.font = [UIFont fontWithName:@"Menlo" size:11] ?: [UIFont systemFontOfSize:11];
-        idL.textColor = SpAccent();
-        idL.translatesAutoresizingMaskIntoConstraints = NO;
-        [surface addSubview:idL];
-        self.headerIdLabel = idL;
-        [idL.leadingAnchor constraintEqualToAnchor:nameL.trailingAnchor constant:10].active = YES;
-        [idL.centerYAnchor constraintEqualToAnchor:nameL.centerYAnchor constant:2].active = YES;
-        [idL.trailingAnchor constraintLessThanOrEqualToAnchor:close.leadingAnchor constant:-8].active = YES;
-        [nameL setContentCompressionResistancePriority:UILayoutPriorityDefaultHigh forAxis:UILayoutConstraintAxisHorizontal];
-        [idL setContentCompressionResistancePriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];
-    }
+    // 授权专属 ID 徽标已随授权校验一并移除(v2.18.1)
     if (cfg.signature.length) {
         UILabel *sig = [[UILabel alloc] init];
         sig.text = cfg.signature;
@@ -2792,32 +2772,9 @@ static NSString *SpVoiceName(NSString *code) {
 
 #pragma mark - 设置页
 
-- (void)licenseChanged:(NSNotification *)note {
-    if (self.headerIdLabel) self.headerIdLabel.text = [NSString stringWithFormat:@"ID: %@", [SparksConfig shared].authCode];
-    if (self.panelRoot.superview) [self scheduleRebuild];
-}
-
 - (void)buildSettingsTab {
     SparksConfig *cfg = [SparksConfig shared];
     __weak typeof(self) ws = self;
-    SparksGlassCard *license = [[SparksGlassCard alloc] initWithCardTitle:@"插件授权"];
-    [license addRow:[SparksInfoRow actionWithTitle:@"授权状态（点击刷新）" value:[SparksLicense statusText] onTap:^{
-        [SparksLicense checkNow];
-        [ws showToast:[SparksLicense statusText]];
-    }]];
-    [license addRow:[SparksInfoRow actionWithTitle:@"专属 ID（点击复制）" value:cfg.authCode.length ? cfg.authCode : @"等待分配" onTap:^{
-        NSString *code = [SparksConfig shared].authCode;
-        if (code.length) { UIPasteboard.generalPasteboard.string = code; [ws showToast:@"专属 ID 已复制"]; }
-    }]];
-    [license addRow:[SparksInfoRow actionWithTitle:@"设备标识（点击复制）" value:[SparksLicense deviceID] onTap:^{
-        NSString *identifier = [SparksLicense deviceID];
-        if (identifier.length) {
-            UIPasteboard.generalPasteboard.string = identifier;
-            [ws showToast:@"设备标识已复制，可在授权后台查找该设备"];
-        }
-    }]];
-    [self.stack addArrangedSubview:license];
-
     // 定时
     SparksGlassCard *timing = [[SparksGlassCard alloc] initWithCardTitle:@"定时"];
     [timing addRow:[[SparksFieldRow alloc] initWithTitle:@"发送时间" placeholder:@"08:30 或 08:30-21:30" secure:NO
@@ -3357,7 +3314,6 @@ didFinishPicking:(NSArray<PHPickerResult *> *)results {
     self.lastSig = nil;                 // 强制重建内容(开关/按钮/图标块全部重读主题色)
     [self rebuildContent];
     [self.seg setIndex:self.tab animated:NO];   // dock 选中图标重着色
-    if (self.headerIdLabel) self.headerIdLabel.textColor = SpAccent();
     [self applyBallIcon];               // 默认火焰图标随主题色
 }
 
@@ -3398,9 +3354,6 @@ didFinishPicking:(NSArray<PHPickerResult *> *)results {
         [top presentViewController:ac animated:YES completion:nil];
     }
 }
-
-// 统一授权服务负责验签、状态与专属 ID，避免两套请求相互覆盖。
-- (void)refreshAuthCode { [SparksLicense checkNow]; }
 
 // 单字段资料编辑弹窗(key: nick/sign)
 - (void)editProfileField:(NSString *)title key:(NSString *)key current:(NSString *)current {
