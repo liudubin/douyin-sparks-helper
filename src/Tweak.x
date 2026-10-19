@@ -259,5 +259,8 @@ static void SparksInit(void) {
 }
 
 %ctor {
+    // 用了 %group 之后,未分组的钩子不再自动装配,必须显式初始化,
+    // 否则 Logos 直接报 "non-initialized hook group: _ungrouped"。
+    %init(_ungrouped);
     SparksInit();
 }

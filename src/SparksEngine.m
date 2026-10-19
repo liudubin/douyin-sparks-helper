@@ -116,7 +116,7 @@ static NSString *_kaLastError = nil;     // 最近一次失败原因(日志里�
         SparksLog(@"🎧 后台保活已开启(静音循环)");
     } else {
         _kaLastError = [NSString stringWithFormat:@"play=NO(会话%@,激活错误=%@,分类错误=%@,其他音频%@)",
-                        session.activationState == AVAudioSessionActivationStateActive ? @"已激活" : @"未激活",
+                        actErr ? @"激活失败" : @"已激活",
                         actErr.localizedDescription ?: @"-",
                         catErr.localizedDescription ?: @"-",
                         session.isOtherAudioPlaying ? @"占用中" : @"空闲"];
@@ -1134,7 +1134,7 @@ static NSString *SpDisplayName(NSDictionary *target) {
     }
     [self.components removeObjectForKey:key];   // 清旧引用,等新页面注册
     self.pollingKey = key;
-    self.pollStartAt = [NSDate timeIntervalSince1970];
+    self.pollStartAt = [[NSDate date] timeIntervalSince1970];
     self.pageOpenAt = 0;
     self.lastInputVCTryAt = 0;
     self.lastInputVCLogAt = 0;
@@ -1166,7 +1166,7 @@ static NSString *SpDisplayName(NSDictionary *target) {
             if (done) done(NO);
             return;
         }
-        NSTimeInterval now = [NSDate timeIntervalSince1970];
+        NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
         if (s.pollStartAt <= 0) s.pollStartAt = now;
         Class ctxCls = ClsSendContext();
         id comp = [s.components objectForKey:key];
@@ -1265,7 +1265,7 @@ static NSString *SpDisplayName(NSDictionary *target) {
 - (BOOL)sendViaInputVC:(NSString *)text target:(NSDictionary *)target {
     if (![SparksLicense isActive]) return NO;
     // 轮询期每 ~2s 会重试本方法,失败原因 10s 内只记一次,否则一屏日志全是同一行
-    NSTimeInterval nowTs = [NSDate timeIntervalSince1970];
+    NSTimeInterval nowTs = [[NSDate date] timeIntervalSince1970];
     BOOL verbose = (self.lastInputVCLogAt <= 0) || (nowTs - self.lastInputVCLogAt > 10);
     if (verbose) self.lastInputVCLogAt = nowTs;
     @try {

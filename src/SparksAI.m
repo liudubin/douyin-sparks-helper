@@ -192,13 +192,26 @@ static NSString *const kSysPrompt =
                     NSString *clean = [self sanitize:raw];
                     if (clean.length < 2) {
                         NSString *reason = choice[@"finish_reason"] ?: @"?";
-                        // 被思考吃光 max_tokens 时,翻倍重来一次比直接发兜底文案划算
+                        // 被思考吃光 max_tokens 时,翻倍重来一次比直接发兜底文案划算。
+                        // 注意作用域:这里在 sendRequest: 的正文里,只有 req,没有 sys/user
+                        // (旧写法直接引用 sys/user,编译期就过不去)。改成就地改请求体重发。
                         if ([reason isEqualToString:@"length"] && maxTokens < 4096) {
                             NSInteger next = maxTokens * 2;
-                            SparksLog(@"⚠️ AI 思考耗尽 token(finish_reason=length),max_tokens %ld→%ld 重试 1 次",
-                                      (long)maxTokens, (long)next);
-                            [self postSystem:sys user:user maxTokens:next completion:completion];
-                            return;
+                            NSMutableDictionary *body = [NSJSONSerialization
+                                JSONObjectWithData:req.HTTPBody
+                                           options:NSJSONReadingMutableContainers
+                                             error:nil];
+                            if ([body isKindOfClass:[NSMutableDictionary class]]) {
+                                body[@"max_tokens"] = @(next);
+                                NSMutableURLRequest *bigger = [req mutableCopy];
+                                bigger.HTTPBody = [NSJSONSerialization dataWithJSONObject:body
+                                                                                  options:0 error:nil];
+                                SparksLog(@"⚠️ AI 思考耗尽 token(finish_reason=length),max_tokens %ld→%ld 重试 1 次",
+                                          (long)maxTokens, (long)next);
+                                [self sendRequest:bigger attempt:attempt maxTokens:next
+                                   timeoutRetried:timeoutRetried completion:completion];
+                                return;
+                            }
                         }
                         SparksLog(@"⚠️ AI 未返回有效正文(finish_reason=%@)，使用兜底文案", reason);
                         if (completion) completion(nil);
