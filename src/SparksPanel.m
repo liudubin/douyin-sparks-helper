@@ -2852,9 +2852,9 @@ static NSString *SpVoiceName(NSString *code) {
     }]];
     [timing addRow:SpRowSeparator()];
     [timing addRow:[[SparksFieldRow alloc] initWithTitle:@"发送间隔(秒)" placeholder:@"75" secure:NO
-                                                    text:[NSString stringWithFormat:@"%.0f", cfg.interval] onChange:^(NSString *v) {
+                                                    text:[NSString stringWithFormat:(cfg.interval < 10 ? @"%.2f" : @"%.0f"), cfg.interval] onChange:^(NSString *v) {
         double d = v.doubleValue;
-        if (d >= 15 && d <= 3600) [SparksConfig shared].interval = d;
+        if (d >= 0.1 && d <= 3600) [SparksConfig shared].interval = d;   // 允许亚秒级密集发送
         else SparksLog(@"⚠️ 间隔需在 15~3600 秒,未保存");
         [[SparksConfig shared] save];
     }]];

@@ -132,6 +132,23 @@ static void SparksLogVersions(void) {
 
 %end
 
+#pragma mark - 底层发送控制器(免跳页直发的回执)
+
+// 40.7.0 里文本真正落到发送管道是在这里:聊天页组件把「上下文 + 会话」转交过来,
+// 免跳页直发则自己带会话模型调它。钩住取回执,面板才能区分"投递"和"真进会话"。
+%hook AWEIMSendMessageController
+
+- (id)sendMessage:(id)context
+     conversation:(id)conversation
+   forwardMessage:(BOOL)forwardMessage
+     mentionUsers:(id)mentionUsers
+        enterFrom:(id)enterFrom {
+    [[SparksEngine shared] noteControllerSend];
+    return %orig;
+}
+
+%end
+
 #pragma mark - 附件(图片/GIF/语音)发送:校准捕获 + 自动直发
 
 %hook AWEIMSendAttachmentController

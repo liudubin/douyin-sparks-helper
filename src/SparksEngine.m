@@ -279,6 +279,10 @@ static NSMutableSet *SpTTSPool(void) {
 @property (nonatomic, assign) BOOL running;
 @property (nonatomic, assign) BOOL inAutoSend;   // 区分插件自动发 / 用户手动发
 @property (nonatomic, copy) void (^sendAckProbe)(void);   // 自动发送后的回执探针(hook 到真实发送时触发)
+// key -> 会话模型(AWEIMMessageConversation)。免跳页直发需要它:底层
+// AWEIMSendMessageController 的入参是"上下文 + 会话对象",而会话对象只能从
+// setConversation: 钩子里拿到。没缓存过就退回打开聊天页那条老路。
+@property (nonatomic, strong) NSMutableDictionary *conversations;
 @property (nonatomic, copy) NSString *pollingKey;   // 正在等待就绪的目标(诊断日志窗口)
 @property (nonatomic, strong) id currentChatVM;   // 最近绑定的聊天页 VM 本体(组件中心兜底用)
 @property (nonatomic, strong) id pendingComponent;   // 会话未绑定时先到的发送组件(挂起等绑定)
@@ -314,6 +318,7 @@ static NSMutableSet *SpTTSPool(void) {
     self = [super init];
     if (self) {
         _components = [NSMapTable strongToWeakObjectsMapTable];
+        _conversations = [NSMutableDictionary dictionary];
     }
     return self;
 }
@@ -507,6 +512,10 @@ static NSMutableSet *SpTTSPool(void) {
     self.currentChatType = type;
     self.currentChatName = name;
     self.currentChatVM = vm;
+    // 存下会话模型本体:免跳页直发时直接复用,不必再打开聊天页
+    if (key.length && conv) {
+        @synchronized (self.conversations) { self.conversations[key] = conv; }
+    }
     // 轮询窗口内打印绑定事件:定位"聊天页就绪超时"到底断在会话绑定还是组件注册
     if (key.length && self.pollingKey.length) {
         SparksLog(@"📥 会话绑定:%@[%@] 轮询目标:%@", name ?: key, type, self.pollingKey);
@@ -952,8 +961,17 @@ static NSString *SpDisplayName(NSDictionary *target) {
             NSInteger nRound = (round + 1 < total) ? (round + 1) : 0;
             double base = (round + 1 < total) ? 25.0 : c.interval;
             if (force) base = MIN(base, 20.0);   // 手动立即跑:目标间隔收紧,整轮更快
-            double delay = base + (double)(arc4random_uniform(40)) - 20.0;
-            if (delay < 15) delay = 15;
+            double delay = base;
+            if (base >= 15.0) {
+                // 常规间隔:±20s 抖动,最少 15s
+                delay = base + (double)(arc4random_uniform(40)) - 20.0;
+                if (delay < 15) delay = 15;
+            } else if (base > 0) {
+                // 亚秒/小间隔:显式要求多快就多快,不加抖动、不抬到 15s
+                delay = base;
+            } else {
+                delay = 15;
+            }
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)),
                            dispatch_get_main_queue(), ^{
                 typeof(self) s3 = ws;
@@ -965,6 +983,11 @@ static NSString *SpDisplayName(NSDictionary *target) {
         void (^sendText)(void) = ^{
             typeof(self) s4 = ws;
             if (!s4) return;
+            // 免跳页优先:有该会话的会话模型就直接投递,页面完全不动
+            if ([s4 sendTextWithoutPage:finalText target:target]) {
+                advance();
+                return;
+            }
             [s4 openChatAndSendToTarget:target text:finalText completion:^(BOOL ok) {
                 if (!ok) [s4 noteTargetFailed:target];   // 记进补发队列,稍后自动再来
                 advance();
@@ -1457,6 +1480,72 @@ static NSString *SpDisplayName(NSDictionary *target) {
         [s closeTopChatPage];
         if (done) done(YES);
     });
+}
+
+#pragma mark - 免跳页直发
+
+// 40.7.0 实测:文本发送的底层不是组件本身,而是
+//   AWEIMSendMessageController -sendMessage:conversation:forwardMessage:mentionUsers:enterFrom:
+// (聊天页组件也只是把「上下文 + 会话」转交给它)。所以只要手里有该会话的
+// conversation 模型,就能完全不打开聊天页直接投递。
+- (BOOL)sendTextWithoutPage:(NSString *)text target:(NSDictionary *)target {
+    if (![SparksLicense isActive]) return NO;
+    NSString *key = SpTargetKey(target);
+    Class ctrlCls = NSClassFromString(@"AWEIMSendMessageController");
+    Class ctxCls = ClsSendContext();
+    id conv = nil;
+    @synchronized (self.conversations) { conv = self.conversations[key]; }
+    if (!ctrlCls || !ctxCls || !conv) {
+        SparksLog(@"⚠️ 免跳页直发缺件(controller=%@,上下文=%@,会话模型=%@),回退打开聊天页:%@",
+                  ctrlCls ? @"有" : @"缺", ctxCls ? @"有" : @"缺",
+                  conv ? @"有" : @"缺", SpDisplayName(target));
+        return NO;
+    }
+    id ctx = [[ctxCls alloc] init];
+    if (!ctx) return NO;
+    SpSetKV(ctx, @"content", [[NSAttributedString alloc] initWithString:text]);
+    SparksConfig *cfg = self.config;
+    if (cfg.relayUserInfo) {
+        id ui = cfg.sendTemplate[@"userInfo"];
+        if ([ui isKindOfClass:[NSDictionary class]]) SpSetKV(ctx, @"userInfo", ui);
+    }
+    NSString *ef = cfg.sendTemplate[@"enterFrom"];
+    if (![ef isKindOfClass:[NSString class]] || !ef.length) ef = @"chat";
+    SpSetKV(ctx, @"enterFrom", ef);
+
+    __block BOOL acked = NO;
+    self.sendAckProbe = ^{ acked = YES; };
+    self.inAutoSend = YES;
+    id msg = nil;
+    @try {
+        msg = ((id (*)(id, SEL, id, id, BOOL, id, id))objc_msgSend)(
+                  [[ctrlCls alloc] init],
+                  @selector(sendMessage:conversation:forwardMessage:mentionUsers:enterFrom:),
+                  ctx, conv, NO, (id)nil, ef);
+    } @catch (NSException *e) {
+        SparksLog(@"⚠️ 免跳页直发异常:%@(%@)", e.name, e.reason);
+    }
+    self.inAutoSend = NO;
+    self.sendAckProbe = nil;
+    if (!msg) return NO;
+
+    SparksLog(@"📤 免跳页直发 %@[%@]:「%@」%@", SpDisplayName(target),
+              SpTargetIsGroup(target) ? @"群" : @"单", text, acked ? @"(已受理)" : @"");
+    [self.config markSent:key];
+    [self.config recordSentText:text forUid:key];
+    [[NSNotificationCenter defaultCenter] postNotificationName:SparksToastNote object:nil
+        userInfo:@{@"text": [NSString stringWithFormat:@"🔥 已给 %@ 续火花", SpDisplayName(target)]}];
+    if (self.onStateChange) self.onStateChange();
+    return YES;
+}
+
+// 底层发送控制器收到发送请求时回调(Tweak.x 的钩子)。
+// 旧的组件钩子对免跳页路径不触发,靠这个确认"投递"确实进了发送管道。
+- (void)noteControllerSend {
+    if (self.sendAckProbe) {
+        void (^probe)(void) = self.sendAckProbe;
+        probe();
+    }
 }
 
 - (void)closeTopChatPage {

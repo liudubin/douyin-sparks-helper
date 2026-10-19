@@ -1,5 +1,21 @@
 # 抖音AI续火花助手 更新日志
 
+## v2.17.0 — 免跳页发送 + 亚秒级间隔 (2026-10-19)
+
+- **免跳页直发**:文本不再必须打开聊天页。40.7.0 里文本发送的真正底层是
+  `AWEIMSendMessageController -sendMessage:conversation:forwardMessage:mentionUsers:enterFrom:`
+  (聊天页组件只是把「发送上下文 + 会话对象」转交给它),所以只要手里有该会话的
+  `AWEIMMessageConversation`,就能直接投递、页面完全不动。
+  会话模型在 `setConversation:` 钩子里顺手缓存(按 uid/cid),每个目标只要**历史上
+  打开过一次**(插件本来就要校准一次),之后整轮发送都不再跳页。
+  没缓存过 → 自动退回原来的"打开聊天页"路径,行为与 v2.16 一致。
+- **发送回执**:新增 `AWEIMSendMessageController` 钩子,免跳页路径也能拿到
+  "已进入发送管道"的确认;日志会标注是否收到回执。
+- **间隔支持亚秒级**:目标间隔不再被硬抬到 ≥15s。填 <15s 时按填的值原样执行
+  (不加 ±20s 抖动);默认值改为 **0.1s**。面板输入范围放宽到 0.1~3600,<10s 显示两位小数。
+- ⚠️ 0.1s 间隔意味着连续的高频发送,命中抖音风控的概率显著上升;建议配合固定文案
+  (AI 生成时真实间隔取决于模型响应,不会是 0.1s)。
+
 ## v2.16.0 — 适配抖音 40.7.0 (CFBundleVersion 407019)
 
 - **修复致命钩子**:`AWEIMMessageListSendMessageComponent` 在 40.7.0 的 method list 里**没有 `-init`**(继承自超类)。旧代码 `%hook ... - (instancetype)init` 会把替换打到超类的 Method 上 —— 等于 hook 全 App 的 init,并把任意对象当成发送组件塞进引擎(`noteComponent:` 不做类型校验),后续 `sendMessage:...` 必崩。已删除该钩子,组件捕获由「组件中心 addComponent:/addComponents:/setComponents:」+「componentDidMounted: / setDataService:」+「VM 组件中心兜底」三条路覆盖。

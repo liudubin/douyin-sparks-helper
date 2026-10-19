@@ -20,6 +20,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -67,10 +68,20 @@ class Api:
                  "-o", body_path, "-w", "%{http_code}",
                  "https://api.github.com" + path]
         try:
-            r = subprocess.run(args, capture_output=True, text=True,
-                               encoding="utf-8", errors="replace")
-            if r.returncode != 0:
-                sys.exit("curl 失败(%d): %s" % (r.returncode, r.stderr.strip()))
+            # 这条网络链路偶发 schannel 握手失败(curl 35)/连接重置(56),重试几次都能过
+            r = None
+            for attempt in range(5):
+                r = subprocess.run(args + ["--retry", "3", "--retry-all-errors",
+                                           "--retry-delay", "2"],
+                                   capture_output=True, text=True,
+                                   encoding="utf-8", errors="replace")
+                code = int((r.stdout or "0").strip() or 0) if r.returncode == 0 else 0
+                if r.returncode == 0 and code not in (0, 502, 503, 504):
+                    break
+                time.sleep(2 + attempt)
+            if r is None or r.returncode != 0:
+                sys.exit("curl 失败(%d): %s" % (r.returncode if r else -1,
+                                                (r.stderr if r else "").strip()))
             code = int(r.stdout.strip() or 0)
             text = Path(body_path).read_text(encoding="utf-8", errors="replace")
             try:

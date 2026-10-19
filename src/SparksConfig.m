@@ -154,7 +154,7 @@ BOOL SparksURLOK(NSURL *url) {
     _dailyTime = [d stringForKey:kDailyTime] ?: @"08:30";
     [self recomputeTodayEffectiveTime];
     double itv = [d doubleForKey:kInterval];
-    _interval  = itv > 0 ? itv : 75.0;
+    _interval  = itv > 0 ? itv : 0.1;   // 默认 0.1s(密集续火花);常规值仍可填 15~3600
     _aiURL   = [d stringForKey:kAiURL] ?: @"https://open.bigmodel.cn/api/paas/v4/chat/completions";
     _aiKey   = [d stringForKey:kAiKey] ?: @"";
     _aiModel = [d stringForKey:kAiModel] ?: @"glm-4-flash";

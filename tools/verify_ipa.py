@@ -29,6 +29,7 @@ REQUIRED = [
     ("AWEIMMessageListSendMessageComponent", ["componentDidMounted:", "setDataService:",
                                               "sendMessage:mentionUsers:customToast:enterFrom:"]),
     ("AWEIMSendAttachmentController",        ["sendAttachmentMsgWithContext:completion:"]),
+    ("AWEIMSendMessageController",           ["sendMessage:conversation:forwardMessage:mentionUsers:enterFrom:"]),
     ("AWEGeneralSettingViewController",      ["viewDidLoad"]),
     ("AWESettingsTableViewController",       ["viewDidAppear:"]),
 ]

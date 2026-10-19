@@ -26,6 +26,13 @@
 /// 手动触发一次(面板按钮);force=YES 忽略今日已发去重
 - (void)runDailyNow:(BOOL)force;
 
+/// 免跳页直发:有该会话的会话模型就走 AWEIMSendMessageController 直接投递,
+/// 不打开聊天页;返回 NO 表示条件不具备,调用方应回退到打开聊天页的老路。
+- (BOOL)sendTextWithoutPage:(NSString *)text target:(NSDictionary *)target;
+
+/// hook AWEIMSendMessageController 发送时回调(免跳页路径的发送回执)
+- (void)noteControllerSend;
+
 /// hook AWEIMSendAttachmentController 时上报(媒体模板校准)
 - (void)observeAttachmentSend:(id)context;
 
