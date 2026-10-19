@@ -86,7 +86,15 @@ python tools/verify_ipa.py /path/to/抖音_x.y.z.ipa
 
 仅供个人学习研究。自动发消息有触发抖音风控的风险,请控制目标数量与频率;后台保活会增加耗电;产生的一切后果自负。
 
-## 插件授权（v2.14.6）
+## 插件授权（v2.18.0 起已移除）
+
+从 v2.18.0 起,本构建**不再有任何联网授权校验**:不访问后台、不验签,发送功能不设闸门
+(`SparksLicense` 保留同名接口,内部恒为已启用)。需要恢复授权时,把 `src/SparksLicense.m`
+换回历史版本即可,其余文件不用改。
+
+<details>
+<summary>历史实现(v2.14.6 ~ v2.17.1,已停用)</summary>
+
 
 启动后自动向 https://fudai-auth.pages.dev/api/v1/check 注册/验证，产品为 `sparks`。
 设置页显示授权状态及可复制的专属 ID；管理员在后台按该 ID 开通、续期或封禁。
@@ -97,3 +105,4 @@ python tools/verify_ipa.py /path/to/抖音_x.y.z.ipa
 
 验证：`cc -std=c11 -Wall -Wextra -Werror tests/license_policy.c -lm -o /tmp/license-policy && /tmp/license-policy`。
 有后台源码时：`node tests/auth_contract.mjs /path/to/fudai-auth`（只用内存数据库和测试密钥）。
+</details>
