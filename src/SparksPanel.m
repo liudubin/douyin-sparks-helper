@@ -184,7 +184,10 @@ static NSAttributedString *SpDotTitle(NSString *name, UIColor *dotColor) {
 static UIView *SpRowSeparator(void) {
     UIView *v = [[UIView alloc] init];
     v.translatesAutoresizingMaskIntoConstraints = NO;
-    v.backgroundColor = [UIColor colorWithWhite:1 alpha:0.07];
+    // 清单风格(uiStyle==3)在浅色底上要用深色发丝线,这里直接读配置避免依赖下方风格函数
+    v.backgroundColor = ([SparksConfig shared].uiStyle == 3)
+        ? [UIColor colorWithWhite:0 alpha:0.08]
+        : [UIColor colorWithWhite:1 alpha:0.07];
     [v.heightAnchor constraintEqualToConstant:0.5].active = YES;
     return v;
 }
@@ -458,8 +461,10 @@ static UIColor *SpArtTextColor(void) {
             [self addSubview:flat];
             _plate = flat;
             _body = flat;
+            // 清单风格:标题移到白卡外面,白卡顶部让出 26pt 给段头
+            CGFloat plateTop = (SpSkinList() && title.length) ? 26 : 0;
             [NSLayoutConstraint activateConstraints:@[
-                [flat.topAnchor constraintEqualToAnchor:self.topAnchor],
+                [flat.topAnchor constraintEqualToAnchor:self.topAnchor constant:plateTop],
                 [flat.bottomAnchor constraintEqualToAnchor:self.bottomAnchor],
                 [flat.leadingAnchor constraintEqualToAnchor:self.leadingAnchor],
                 [flat.trailingAnchor constraintEqualToAnchor:self.trailingAnchor],
@@ -493,7 +498,20 @@ static UIColor *SpArtTextColor(void) {
             ]];
         }
 
-        if (title.length) {
+        if (title.length && SpSkinList()) {
+            // 清单风格:标题作为段头贴在白卡上方(系统分组列表的观感)
+            UILabel *sec = [[UILabel alloc] init];
+            sec.text = title;
+            sec.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
+            sec.textColor = SpArtTitleColor();
+            sec.translatesAutoresizingMaskIntoConstraints = NO;
+            [self addSubview:sec];
+            [NSLayoutConstraint activateConstraints:@[
+                [sec.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:16],
+                [sec.topAnchor constraintEqualToAnchor:self.topAnchor],
+                [sec.heightAnchor constraintEqualToConstant:20],
+            ]];
+        } else if (title.length) {
             [self ensureStack];
             // 标题缩进容器:与行首图标方块(16pt)对齐留呼吸感,不影响行堆叠
             UIView *titleWrap = [[UIView alloc] init];
@@ -1229,6 +1247,7 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
 @property (nonatomic, strong) UIView *backgroundTapView;
 @property (nonatomic, strong) UIView *donateView;
 @property (nonatomic, assign) NSInteger feedFilter;    // 卡片流筛选:0 全部 1 待发 2 已发
+@property (nonatomic, assign) BOOL feedManaging;          // 卡片流风格下是否展开原有目标管理卡
 @property (nonatomic, copy) NSString *detailKey;      // 目标单独设置页:正在查看的目标 key(空=列表)
 @end
 
@@ -1299,6 +1318,7 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
 - (void)spBuildConsoleButton;
 - (void)spBuildConsoleOps;
 - (UIStackView *)spConsoleRow:(NSArray<UIView *> *)tiles;
+- (void)spFeedFabTapped;
 - (void)applyAvatarInto:(UIView *)avatar;
 - (void)applyPanelBackground;
 - (void)segChangedTo:(NSInteger)idx;
@@ -2032,7 +2052,8 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
     scroll.showsVerticalScrollIndicator = NO;
     scroll.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
     // v2.14:首卡/末卡与面板边缘的间距=卡间距 12,整体节奏一致
-    scroll.contentInset = UIEdgeInsetsMake(12, 0, 12, 0);
+    // 卡片流风格右下有常驻 FAB,底部多留一段,避免最后一张卡被压住
+    scroll.contentInset = UIEdgeInsetsMake(12, 0, SpSkinFeed() ? 84 : 12, 0);
     scroll.translatesAutoresizingMaskIntoConstraints = NO;
     [root addSubview:scroll];
     if (dockBottom) {
@@ -2045,6 +2066,29 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
     }
     [scroll.leadingAnchor constraintEqualToAnchor:root.leadingAnchor constant:14].active = YES;
     [scroll.trailingAnchor constraintEqualToAnchor:root.trailingAnchor constant:-14].active = YES;
+
+    // 卡片流风格的常驻 FAB:浮在 dock 上方右侧
+    if (SpSkinFeed()) {
+        UIButton *fab = [UIButton buttonWithType:UIButtonTypeSystem];
+        [fab setImage:[UIImage systemImageNamed:@"flame.fill"] forState:UIControlStateNormal];
+        fab.tintColor = [UIColor whiteColor];
+        fab.backgroundColor = SpAccent();
+        fab.layer.cornerRadius = 28;
+        fab.layer.cornerCurve = kCACornerCurveContinuous;
+        fab.layer.shadowColor = [UIColor blackColor].CGColor;
+        fab.layer.shadowOpacity = 0.28;
+        fab.layer.shadowRadius = 10;
+        fab.layer.shadowOffset = CGSizeMake(0, 4);
+        fab.translatesAutoresizingMaskIntoConstraints = NO;
+        [fab addTarget:self action:@selector(spFeedFabTapped) forControlEvents:UIControlEventTouchUpInside];
+        [root addSubview:fab];
+        [NSLayoutConstraint activateConstraints:@[
+            [fab.trailingAnchor constraintEqualToAnchor:root.trailingAnchor constant:-20],
+            [fab.bottomAnchor constraintEqualToAnchor:seg.topAnchor constant:-16],
+            [fab.widthAnchor constraintEqualToConstant:56],
+            [fab.heightAnchor constraintEqualToConstant:56],
+        ]];
+    }
 
     UIStackView *stack = [[UIStackView alloc] init];
     stack.axis = UILayoutConstraintAxisVertical;
@@ -2301,6 +2345,12 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
 }
 
 #pragma mark - 目标卡片流(v2.19.0)
+
+- (void)spFeedFabTapped {
+    [[SparksConfig shared] save];
+    [[SparksEngine shared] runDailyNow:YES];
+    [self scheduleRebuild];
+}
 
 - (void)spFeedPillTapped:(UIButton *)b {
     self.feedFilter = b.tag;
@@ -2586,13 +2636,38 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
         ]];
         [self.stack addArrangedSubview:pillWrap];
 
-        for (NSDictionary *t in [cfg.targets copy]) {
-            BOOL sent = [cfg sentToday:SpTargetKeyOf(t)];
-            if (self.feedFilter == 1 && sent) continue;
-            if (self.feedFilter == 2 && !sent) continue;
-            UIView *feedCard = [self spFeedCardForTarget:t];
-            if (feedCard) [self.stack addArrangedSubview:feedCard];
+        if (!self.feedManaging) {
+            for (NSDictionary *t in [cfg.targets copy]) {
+                BOOL sent = [cfg sentToday:SpTargetKeyOf(t)];
+                if (self.feedFilter == 1 && sent) continue;
+                if (self.feedFilter == 2 && !sent) continue;
+                UIView *feedCard = [self spFeedCardForTarget:t];
+                if (feedCard) [self.stack addArrangedSubview:feedCard];
+            }
+            // 卡片流接管本页:原有"目标管理"整卡折叠到这一个入口后面
+            SparksGlassCard *manage = [[SparksGlassCard alloc] initWithCardTitle:nil];
+            __weak typeof(self) wsm = self;
+            [manage addRow:[SparksInfoRow actionWithTitle:@"管理目标"
+                                                   value:[NSString stringWithFormat:@"%lu 个 ›", (unsigned long)cfg.targets.count]
+                                                   onTap:^{
+                typeof(self) s = wsm;
+                if (!s) return;
+                s.feedManaging = YES;
+                [s scheduleRebuild];
+            }]];
+            [self.stack addArrangedSubview:manage];
+            return;
         }
+        // 管理模式:给一条回到卡片流的入口,下面继续走原有管理卡片
+        SparksGlassCard *back = [[SparksGlassCard alloc] initWithCardTitle:nil];
+        __weak typeof(self) wsb = self;
+        [back addRow:[SparksInfoRow actionWithTitle:@"← 返回卡片流" value:@"" onTap:^{
+            typeof(self) s = wsb;
+            if (!s) return;
+            s.feedManaging = NO;
+            [s scheduleRebuild];
+        }]];
+        [self.stack addArrangedSubview:back];
     }
 
     SparksGlassCard *card = [[SparksGlassCard alloc]
