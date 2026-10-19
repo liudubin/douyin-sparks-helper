@@ -2001,6 +2001,25 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
     [close addTarget:self action:@selector(closePanel) forControlEvents:UIControlEventTouchUpInside];
     [nameL.trailingAnchor constraintLessThanOrEqualToAnchor:close.leadingAnchor constant:-8].active = YES;
 
+    // v2.19.5:头部也是"所有 tab 共用"的,必须一起换 —— 新风格收起头像块,改标题式头部
+    if (SpSkinFlat()) {
+        avatar.hidden = YES;
+        nameL.hidden = YES;
+        UILabel *t = [[UILabel alloc] init];
+        t.text = @"续火花";
+        t.font = [UIFont systemFontOfSize:SpSkinList() ? 17 : 20 weight:UIFontWeightBold];
+        t.textColor = SpArtTextColor();
+        t.textAlignment = SpSkinList() ? NSTextAlignmentCenter : NSTextAlignmentLeft;
+        t.translatesAutoresizingMaskIntoConstraints = NO;
+        [surface addSubview:t];
+        [t.centerYAnchor constraintEqualToAnchor:surface.centerYAnchor].active = YES;
+        if (SpSkinList()) {
+            [t.centerXAnchor constraintEqualToAnchor:surface.centerXAnchor].active = YES;
+        } else {
+            [t.leadingAnchor constraintEqualToAnchor:surface.leadingAnchor constant:16].active = YES;
+        }
+    }
+
     // 授权专属 ID 徽标已随授权校验一并移除(v2.18.1)
     if (cfg.signature.length) {
         UILabel *sig = [[UILabel alloc] init];
@@ -2597,8 +2616,8 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
         return;
     }
 
-    // 目标卡片流风格:筛选胶囊 + 每个目标一张卡,下面接原有管理卡片
-    if (SpSkinFeed() && cfg.targets.count) {
+    // 控制台 / 目标卡片流:目标页都换成卡片流(控制台不带筛选胶囊)
+    if ((SpSkinFeed() || SpSkinConsole()) && cfg.targets.count) {
         NSUInteger pending = 0;
         for (NSDictionary *t in cfg.targets) if (![cfg sentToday:SpTargetKeyOf(t)]) pending++;
         NSUInteger total = cfg.targets.count;
@@ -2611,7 +2630,7 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
         pills.axis = UILayoutConstraintAxisHorizontal;
         pills.spacing = 8;
         pills.translatesAutoresizingMaskIntoConstraints = NO;
-        for (NSInteger i = 0; i < 3; i++) {
+        for (NSInteger i = 0; SpSkinFeed() && i < 3; i++) {
             BOOL on = (self.feedFilter == i);
             UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
             [b setTitle:names[(NSUInteger)i] forState:UIControlStateNormal];
@@ -2634,7 +2653,7 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
             [pills.bottomAnchor constraintEqualToAnchor:pillWrap.bottomAnchor],
             [pills.trailingAnchor constraintLessThanOrEqualToAnchor:pillWrap.trailingAnchor],
         ]];
-        [self.stack addArrangedSubview:pillWrap];
+        if (SpSkinFeed()) [self.stack addArrangedSubview:pillWrap];
 
         if (!self.feedManaging) {
             for (NSDictionary *t in [cfg.targets copy]) {
