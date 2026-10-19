@@ -1228,6 +1228,7 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
 @property (nonatomic, strong) UIView *panelRoot;
 @property (nonatomic, strong) UIView *backgroundTapView;
 @property (nonatomic, strong) UIView *donateView;
+@property (nonatomic, assign) NSInteger feedFilter;    // 卡片流筛选:0 全部 1 待发 2 已发
 @property (nonatomic, copy) NSString *detailKey;      // 目标单独设置页:正在查看的目标 key(空=列表)
 @end
 
@@ -1872,6 +1873,10 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
     UIView *root = [[UIView alloc] initWithFrame:CGRectMake((screen.size.width - pw) / 2,
                                                             (screen.size.height - ph) / 2, pw, ph)];
     root.backgroundColor = [UIColor clearColor];   // v2.13.2 用户点名取消淡底:卡片直浮于视频上
+    if (SpSkinList()) {
+        // 极简清单:面板本身给一层浅灰底,白卡才有"分组列表"的落点
+        root.backgroundColor = [UIColor colorWithWhite:0.96 alpha:0.98];
+    }
     // 根容器统一圆角+裁切:内容卡片(边距 14pt<32pt 圆角)在底衬圆角外穿直角的根因修复
     root.layer.cornerRadius = 32;
     root.layer.cornerCurve = kCACornerCurveContinuous;
@@ -2006,7 +2011,13 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
     [seg setIndex:self.tab animated:NO];   // 外观重建后保持当前页,避免圆片与内容错位
     seg.translatesAutoresizingMaskIntoConstraints = NO;
     [root addSubview:seg];
-    [seg.topAnchor constraintEqualToAnchor:header.bottomAnchor constant:12].active = YES;
+    // v2.19.2:dock 位置随风格走 —— 玻璃风格在头部下方(原样),三种新风格挪到面板底部
+    BOOL dockBottom = SpSkinFlat();
+    if (dockBottom) {
+        [seg.bottomAnchor constraintEqualToAnchor:root.bottomAnchor constant:-14].active = YES;
+    } else {
+        [seg.topAnchor constraintEqualToAnchor:header.bottomAnchor constant:12].active = YES;
+    }
     [seg.leadingAnchor constraintEqualToAnchor:root.leadingAnchor constant:14].active = YES;
     [seg.trailingAnchor constraintEqualToAnchor:root.trailingAnchor constant:-14].active = YES;
     [seg.heightAnchor constraintEqualToConstant:52].active = YES;
@@ -2019,10 +2030,16 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
     scroll.contentInset = UIEdgeInsetsMake(12, 0, 12, 0);
     scroll.translatesAutoresizingMaskIntoConstraints = NO;
     [root addSubview:scroll];
-    [scroll.topAnchor constraintEqualToAnchor:seg.bottomAnchor constant:12].active = YES;
+    if (dockBottom) {
+        // dock 在底部:内容区从头部下方一直到 dock 上沿
+        [scroll.topAnchor constraintEqualToAnchor:header.bottomAnchor constant:12].active = YES;
+        [scroll.bottomAnchor constraintEqualToAnchor:seg.topAnchor constant:-12].active = YES;
+    } else {
+        [scroll.topAnchor constraintEqualToAnchor:seg.bottomAnchor constant:12].active = YES;
+        [scroll.bottomAnchor constraintEqualToAnchor:root.bottomAnchor constant:-14].active = YES;
+    }
     [scroll.leadingAnchor constraintEqualToAnchor:root.leadingAnchor constant:14].active = YES;
     [scroll.trailingAnchor constraintEqualToAnchor:root.trailingAnchor constant:-14].active = YES;
-    [scroll.bottomAnchor constraintEqualToAnchor:root.bottomAnchor constant:-14].active = YES;
 
     UIStackView *stack = [[UIStackView alloc] init];
     stack.axis = UILayoutConstraintAxisVertical;
@@ -2063,10 +2080,11 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
     for (NSDictionary *t in cfg.targets) if ([cfg sentToday:SpTargetKeyOf(t)]) done++;
     // 含 tab:切换页面必须重建(去重只挡同页同状态的重复刷新);
     // 含底衬/背景图:切换后行标签与即时视觉保持一致
-    return [NSString stringWithFormat:@"tab%ld|%lu|%d|%d|%lu|%d|bd%ld|bg%d",
+    return [NSString stringWithFormat:@"tab%ld|%lu|%d|%d|%lu|%d|bd%ld|bg%d|us%ld|ff%ld",
             (long)self.tab, (unsigned long)cfg.targets.count, cfg.master, eng.running,
             (unsigned long)done, cfg.sendTemplate != nil,
-            (long)cfg.panelBackdrop, cfg.panelBgPath.length > 0];
+            (long)cfg.panelBackdrop, cfg.panelBgPath.length > 0,
+            (long)cfg.uiStyle, (long)self.feedFilter];
 }
 
 - (void)scheduleRebuild {
@@ -2171,6 +2189,11 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
 }
 
 #pragma mark - 目标卡片流(v2.19.0)
+
+- (void)spFeedPillTapped:(UIButton *)b {
+    self.feedFilter = b.tag;
+    [self scheduleRebuild];
+}
 
 - (UIView *)spFeedCardForTarget:(NSDictionary *)t {
     SparksConfig *cfg = [SparksConfig shared];
@@ -2409,9 +2432,49 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
         return;
     }
 
-    // 目标卡片流风格:每个目标一张卡(头像 + 状态),下面接原有管理卡片
+    // 目标卡片流风格:筛选胶囊 + 每个目标一张卡,下面接原有管理卡片
     if (SpSkinFeed() && cfg.targets.count) {
+        NSUInteger pending = 0;
+        for (NSDictionary *t in cfg.targets) if (![cfg sentToday:SpTargetKeyOf(t)]) pending++;
+        NSUInteger total = cfg.targets.count;
+        NSArray<NSString *> *names = @[
+            [NSString stringWithFormat:@"全部 %lu", (unsigned long)total],
+            [NSString stringWithFormat:@"待发 %lu", (unsigned long)pending],
+            [NSString stringWithFormat:@"已发 %lu", (unsigned long)(total - pending)]];
+
+        UIStackView *pills = [[UIStackView alloc] init];
+        pills.axis = UILayoutConstraintAxisHorizontal;
+        pills.spacing = 8;
+        pills.translatesAutoresizingMaskIntoConstraints = NO;
+        for (NSInteger i = 0; i < 3; i++) {
+            BOOL on = (self.feedFilter == i);
+            UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
+            [b setTitle:names[(NSUInteger)i] forState:UIControlStateNormal];
+            b.titleLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
+            [b setTitleColor:(on ? [UIColor blackColor] : SpW(0.72)) forState:UIControlStateNormal];
+            b.backgroundColor = on ? SpAccent() : [UIColor colorWithWhite:1 alpha:0.10];
+            b.layer.cornerRadius = 14;
+            b.layer.cornerCurve = kCACornerCurveContinuous;
+            b.tag = i;
+            b.contentEdgeInsets = UIEdgeInsetsMake(6, 14, 6, 14);
+            [b addTarget:self action:@selector(spFeedPillTapped:) forControlEvents:UIControlEventTouchUpInside];
+            [pills addArrangedSubview:b];
+        }
+        UIView *pillWrap = [[UIView alloc] init];
+        pillWrap.translatesAutoresizingMaskIntoConstraints = NO;
+        [pillWrap addSubview:pills];
+        [NSLayoutConstraint activateConstraints:@[
+            [pills.leadingAnchor constraintEqualToAnchor:pillWrap.leadingAnchor],
+            [pills.topAnchor constraintEqualToAnchor:pillWrap.topAnchor],
+            [pills.bottomAnchor constraintEqualToAnchor:pillWrap.bottomAnchor],
+            [pills.trailingAnchor constraintLessThanOrEqualToAnchor:pillWrap.trailingAnchor],
+        ]];
+        [self.stack addArrangedSubview:pillWrap];
+
         for (NSDictionary *t in [cfg.targets copy]) {
+            BOOL sent = [cfg sentToday:SpTargetKeyOf(t)];
+            if (self.feedFilter == 1 && sent) continue;
+            if (self.feedFilter == 2 && !sent) continue;
             UIView *feedCard = [self spFeedCardForTarget:t];
             if (feedCard) [self.stack addArrangedSubview:feedCard];
         }
