@@ -985,13 +985,16 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
 @end
 
 @implementation SparksGlassSeg {
-    UIView *_barWrap;   // 玻璃条容器
+    UIView *_barWrap;   // 底条容器(玻璃或实底)
     NSArray<SparksSegTab *> *_tabs;
     NSArray<UIImageView *> *_icons;
     NSArray<UIView *> *_dots;
+    NSArray<UILabel *> *_labels;
     NSArray<NSString *> *_titles;
     void (^_sel)(NSInteger);
     NSInteger _index;
+    BOOL _usePill;      // 风格 0/1 才有选中胶囊
+    BOOL _showLabels;   // 风格 1/2/3 图标下带文字
 }
 
 // 五个页签的图标(顺序与 titles 对应)
@@ -1004,28 +1007,53 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
     self = [super initWithFrame:CGRectMake(0, 0, 320, 50)];
     if (self) {
         self.translatesAutoresizingMaskIntoConstraints = NO;
-        // 液态玻璃条:模糊+白描边,内容(页签)叠上
+        // 底条:v2.19 起四种风格各一套;玻璃风格保持原样
         self.backgroundColor = [UIColor clearColor];
-        UIVisualEffectView *barGlass = SpMakeGlassView();
-        _barWrap = SpGlassWrap(barGlass, 18);   // 圆角与卡片(18)统一
-        _barWrap.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.16].CGColor;
-        _barWrap.layer.borderWidth = 1;
-        _barWrap.userInteractionEnabled = NO;
-        [self addSubview:_barWrap];
-        // v2.14:与卡片同款 scrim+浓度系数,修"top栏和卡片颜色不一致"
-        UIView *barScrim = [[UIView alloc] init];
-        barScrim.translatesAutoresizingMaskIntoConstraints = NO;
-        double bca = ([SparksConfig shared].cardAlpha >= 0.4) ? [SparksConfig shared].cardAlpha : 1.0;
-        barScrim.backgroundColor = [UIColor colorWithWhite:0 alpha:0.20 * bca];
-        barScrim.userInteractionEnabled = NO;
-        [barGlass.contentView addSubview:barScrim];
-        [barGlass.contentView sendSubviewToBack:barScrim];
-        [NSLayoutConstraint activateConstraints:@[
-            [barScrim.topAnchor constraintEqualToAnchor:barGlass.contentView.topAnchor],
-            [barScrim.bottomAnchor constraintEqualToAnchor:barGlass.contentView.bottomAnchor],
-            [barScrim.leadingAnchor constraintEqualToAnchor:barGlass.contentView.leadingAnchor],
-            [barScrim.trailingAnchor constraintEqualToAnchor:barGlass.contentView.trailingAnchor],
-        ]];
+        _usePill = (SpUIStyle() == 0 || SpSkinConsole());
+        _showLabels = SpSkinFlat();
+        CGFloat barR = SpSkinList() ? 12 : (SpSkinFlat() ? 20 : 18);
+        if (SpSkinFlat()) {
+            UIView *bar = [[UIView alloc] init];
+            bar.translatesAutoresizingMaskIntoConstraints = NO;
+            bar.userInteractionEnabled = NO;
+            bar.layer.cornerRadius = barR;
+            bar.layer.cornerCurve = kCACornerCurveContinuous;
+            if (SpSkinList()) {
+                bar.backgroundColor = [UIColor colorWithWhite:0.985 alpha:1.0];
+                bar.layer.borderWidth = 0.5;
+                bar.layer.borderColor = [UIColor colorWithWhite:0 alpha:0.10].CGColor;
+            } else if (SpSkinConsole()) {
+                bar.backgroundColor = [UIColor colorWithWhite:0.09 alpha:0.94];
+                bar.layer.borderWidth = 1;
+                bar.layer.borderColor = SpCardStroke().CGColor;
+            } else {
+                // 目标卡片流:bar 几乎透明,强调"无壳"
+                bar.backgroundColor = [UIColor colorWithWhite:0.06 alpha:0.55];
+            }
+            _barWrap = bar;
+            [self addSubview:bar];
+        } else {
+            UIVisualEffectView *barGlass = SpMakeGlassView();
+            _barWrap = SpGlassWrap(barGlass, 18);   // 圆角与卡片(18)统一
+            _barWrap.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.16].CGColor;
+            _barWrap.layer.borderWidth = 1;
+            _barWrap.userInteractionEnabled = NO;
+            [self addSubview:_barWrap];
+            // v2.14:与卡片同款 scrim+浓度系数,修"top栏和卡片颜色不一致"
+            UIView *barScrim = [[UIView alloc] init];
+            barScrim.translatesAutoresizingMaskIntoConstraints = NO;
+            double bca = ([SparksConfig shared].cardAlpha >= 0.4) ? [SparksConfig shared].cardAlpha : 1.0;
+            barScrim.backgroundColor = [UIColor colorWithWhite:0 alpha:0.20 * bca];
+            barScrim.userInteractionEnabled = NO;
+            [barGlass.contentView addSubview:barScrim];
+            [barGlass.contentView sendSubviewToBack:barScrim];
+            [NSLayoutConstraint activateConstraints:@[
+                [barScrim.topAnchor constraintEqualToAnchor:barGlass.contentView.topAnchor],
+                [barScrim.bottomAnchor constraintEqualToAnchor:barGlass.contentView.bottomAnchor],
+                [barScrim.leadingAnchor constraintEqualToAnchor:barGlass.contentView.leadingAnchor],
+                [barScrim.trailingAnchor constraintEqualToAnchor:barGlass.contentView.trailingAnchor],
+            ]];
+        }
         [NSLayoutConstraint activateConstraints:@[
             [_barWrap.topAnchor constraintEqualToAnchor:self.topAnchor],
             [_barWrap.bottomAnchor constraintEqualToAnchor:self.bottomAnchor],
@@ -1041,21 +1069,26 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
         NSMutableArray *tabs = [NSMutableArray array];
         NSMutableArray *iconsA = [NSMutableArray array];
         NSMutableArray *dotsA = [NSMutableArray array];
+        NSMutableArray *labelsA = [NSMutableArray array];
         for (NSUInteger i = 0; i < titles.count; i++) {
             SparksSegTab *t = [[SparksSegTab alloc] init];
             t.tag = i;
 
-            // 选中胶囊:浅色圆头浮层(圆角=高/2,带浮起阴影)
+            // 选中胶囊:玻璃风格=白色浮起圆片;控制台=主题色染底;卡片流/清单不要胶囊
             UIView *wrap = [[UIView alloc] init];
-            wrap.backgroundColor = [UIColor colorWithWhite:1 alpha:0.92];   // 选中=白色胶囊
-            wrap.layer.cornerRadius = 17;
+            wrap.layer.cornerRadius = 16;
             wrap.layer.cornerCurve = kCACornerCurveContinuous;
-            wrap.layer.shadowColor = [UIColor blackColor].CGColor;
-            wrap.layer.shadowOpacity = 0.18;
-            wrap.layer.shadowRadius = 4;
-            wrap.layer.shadowOffset = CGSizeMake(0, 2);
-            wrap.layer.shadowPath = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(0, 0, 52, 34)
-                                                               cornerRadius:17].CGPath;   // 固定尺寸直接给路径
+            if (SpSkinConsole()) {
+                wrap.backgroundColor = [SpAccent() colorWithAlphaComponent:0.18];
+            } else {
+                wrap.backgroundColor = [UIColor colorWithWhite:1 alpha:0.92];
+                wrap.layer.shadowColor = [UIColor blackColor].CGColor;
+                wrap.layer.shadowOpacity = 0.18;
+                wrap.layer.shadowRadius = 4;
+                wrap.layer.shadowOffset = CGSizeMake(0, 2);
+                wrap.layer.shadowPath = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(0, 0, 52, 34)
+                                                                   cornerRadius:16].CGPath;
+            }
             wrap.hidden = YES;
             wrap.userInteractionEnabled = NO;
             wrap.translatesAutoresizingMaskIntoConstraints = NO;
@@ -1072,22 +1105,42 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
             ic.tintColor = SpW(0.55);
             ic.translatesAutoresizingMaskIntoConstraints = NO;
             [t addSubview:ic];
+            // 带文字的风格把图标上抬,给下方 9pt 标签让位
+            CGFloat iconSide = _showLabels ? 19 : 20;
             [ic.centerXAnchor constraintEqualToAnchor:t.centerXAnchor].active = YES;
-            [ic.centerYAnchor constraintEqualToAnchor:t.centerYAnchor].active = YES;
-            [ic.widthAnchor constraintEqualToConstant:20].active = YES;
-            [ic.heightAnchor constraintEqualToConstant:20].active = YES;
+            [ic.centerYAnchor constraintEqualToAnchor:t.centerYAnchor
+                                             constant:_showLabels ? -7 : 0].active = YES;
+            [ic.widthAnchor constraintEqualToConstant:iconSide].active = YES;
+            [ic.heightAnchor constraintEqualToConstant:iconSide].active = YES;
 
-            // 底部小圆点(第二状态指示)
+            UILabel *lb = nil;
+            if (_showLabels) {
+                lb = [[UILabel alloc] init];
+                lb.text = titles[i];
+                lb.font = [UIFont systemFontOfSize:9 weight:UIFontWeightMedium];
+                lb.textColor = SpSkinList() ? [UIColor colorWithWhite:0.45 alpha:1] : SpW(0.55);
+                lb.textAlignment = NSTextAlignmentCenter;
+                lb.userInteractionEnabled = NO;
+                lb.translatesAutoresizingMaskIntoConstraints = NO;
+                [t addSubview:lb];
+                [lb.centerXAnchor constraintEqualToAnchor:t.centerXAnchor].active = YES;
+                [lb.topAnchor constraintEqualToAnchor:ic.bottomAnchor constant:1].active = YES;
+            }
+            [labelsA addObject:lb ?: (UILabel *)[NSNull null]];
+
+            // 底部小圆点:只有玻璃风格用(其余风格靠文字/配色区分)
             UIView *dot = [[UIView alloc] init];
             dot.backgroundColor = [UIColor clearColor];
             dot.layer.cornerRadius = 2;
             dot.translatesAutoresizingMaskIntoConstraints = NO;
             dot.userInteractionEnabled = NO;
-            [t addSubview:dot];
-            [dot.centerXAnchor constraintEqualToAnchor:t.centerXAnchor].active = YES;
-            [dot.topAnchor constraintEqualToAnchor:t.bottomAnchor constant:-5].active = YES;
-            [dot.widthAnchor constraintEqualToConstant:4].active = YES;
-            [dot.heightAnchor constraintEqualToConstant:4].active = YES;
+            if (SpUIStyle() == 0) {
+                [t addSubview:dot];
+                [dot.centerXAnchor constraintEqualToAnchor:t.centerXAnchor].active = YES;
+                [dot.topAnchor constraintEqualToAnchor:t.bottomAnchor constant:-5].active = YES;
+                [dot.widthAnchor constraintEqualToConstant:4].active = YES;
+                [dot.heightAnchor constraintEqualToConstant:4].active = YES;
+            }
 
             [t addTarget:self action:@selector(spTabTapped:) forControlEvents:UIControlEventTouchUpInside];
             [self addSubview:t];
@@ -1098,6 +1151,7 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
         _tabs = tabs;
         _icons = iconsA;
         _dots = dotsA;
+        _labels = labelsA;
         [self setIndex:0 animated:NO];
     }
     return self;
@@ -1115,15 +1169,21 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
 - (void)setIndex:(NSInteger)i animated:(BOOL)animated {
     _index = i;
     void (^apply)(void) = ^{
+        UIColor *idle = SpSkinList() ? [UIColor colorWithWhite:0.45 alpha:1] : SpW(0.55);
         for (NSUInteger k = 0; k < self->_tabs.count; k++) {
             BOOL on = ((NSInteger)k == self->_index);
             UIView *wrap = objc_getAssociatedObject(self->_tabs[k], "wrap");
-            wrap.hidden = !on;
-            self->_icons[k].tintColor = on ? SpAccent() : SpW(0.55);   // 选中图标跟主题色(琥珀)
-            self->_dots[k].backgroundColor = on ? SpAccent() : [UIColor clearColor];
+            wrap.hidden = !(on && self->_usePill);
+            self->_icons[k].tintColor = on ? SpAccent() : idle;   // 选中图标跟主题色
+            if (k < self->_dots.count && self->_dots[k].superview) {
+                self->_dots[k].backgroundColor = on ? SpAccent() : [UIColor clearColor];
+            }
+            if (k < self->_labels.count && [self->_labels[k] isKindOfClass:[UILabel class]]) {
+                ((UILabel *)self->_labels[k]).textColor = on ? SpAccent() : idle;
+            }
         }
     };
-    if (animated) {
+    if (animated && _usePill) {
         // 圆片淡入浮起
         UIView *wrap = objc_getAssociatedObject(_tabs[i], "wrap");
         wrap.transform = CGAffineTransformMakeScale(0.7, 0.7);
