@@ -132,6 +132,19 @@ static void SparksLogVersions(void) {
 
 %end
 
+#pragma mark - 会话模型批量缓存(免跳页直发的前置条件)
+
+// 40.7.0 的消息列表页 VM。一次性拿到整批会话模型 —— 用户开一次"消息"页,
+// 所有目标就都满足"免跳页直发"的条件,不必逐个点进聊天页。
+%hook LSIMChatListVM
+
+- (void)setConversations:(NSArray *)conversations {
+    %orig;
+    [[SparksEngine shared] noteConversations:conversations];
+}
+
+%end
+
 #pragma mark - 底层发送控制器(免跳页直发的回执)
 
 // 40.7.0 里文本真正落到发送管道是在这里:聊天页组件把「上下文 + 会话」转交过来,

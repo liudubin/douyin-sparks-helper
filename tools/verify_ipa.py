@@ -30,6 +30,7 @@ REQUIRED = [
                                               "sendMessage:mentionUsers:customToast:enterFrom:"]),
     ("AWEIMSendAttachmentController",        ["sendAttachmentMsgWithContext:completion:"]),
     ("AWEIMSendMessageController",           ["sendMessage:conversation:forwardMessage:mentionUsers:enterFrom:"]),
+    ("LSIMChatListVM",                      ["setConversations:"]),
     ("AWEGeneralSettingViewController",      ["viewDidLoad"]),
     ("AWESettingsTableViewController",       ["viewDidAppear:"]),
 ]

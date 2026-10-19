@@ -30,6 +30,9 @@
 /// 不打开聊天页;返回 NO 表示条件不具备,调用方应回退到打开聊天页的老路。
 - (BOOL)sendTextWithoutPage:(NSString *)text target:(NSDictionary *)target;
 
+/// hook LSIMChatListVM setConversations: 时整批缓存会话模型(免跳页直发的前置条件)
+- (void)noteConversations:(NSArray *)list;
+
 /// hook AWEIMSendMessageController 发送时回调(免跳页路径的发送回执)
 - (void)noteControllerSend;
 

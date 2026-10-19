@@ -1484,6 +1484,43 @@ static NSString *SpDisplayName(NSDictionary *target) {
 
 #pragma mark - 免跳页直发
 
+// 从会话模型取 key:单聊=对方 uid,群聊=会话 cid(与 noteConversation: 同规则)
+static NSString *SpConversationKey(id conv) {
+    if (!conv) return nil;
+    NSString *uid = nil, *cid = nil;
+    if ([conv respondsToSelector:@selector(peerUserID)]) {
+        id v = [conv performSelector:@selector(peerUserID)];
+        if ([v isKindOfClass:[NSString class]]) uid = v;
+        else if ([v respondsToSelector:@selector(longLongValue)]) uid = [NSString stringWithFormat:@"%lld", [v longLongValue]];
+    }
+    if (!uid.length && [conv respondsToSelector:@selector(conversationID)]) {
+        id v = [conv performSelector:@selector(conversationID)];
+        if ([v isKindOfClass:[NSString class]]) cid = v;
+        else if ([v respondsToSelector:@selector(longLongValue)]) cid = [NSString stringWithFormat:@"%lld", [v longLongValue]];
+    }
+    return uid.length ? uid : (cid.length ? cid : nil);
+}
+
+// 消息列表页一加载就整批收进缓存:用户只要开一次"消息"页,所有目标就都具备
+// 免跳页直发的条件,不用逐个目标点进聊天页
+- (void)noteConversations:(NSArray *)list {
+    if (![list isKindOfClass:[NSArray class]] || !list.count) return;
+    NSUInteger added = 0;
+    @synchronized (self.conversations) {
+        for (id conv in list) {
+            NSString *k = SpConversationKey(conv);
+            if (k.length && !self.conversations[k]) {
+                self.conversations[k] = conv;
+                added++;
+            }
+        }
+    }
+    if (added) {
+        SparksLog(@"📇 会话模型缓存 +%lu(共 %lu),整轮可免跳页直发",
+                  (unsigned long)added, (unsigned long)self.conversations.count);
+    }
+}
+
 // 40.7.0 实测:文本发送的底层不是组件本身,而是
 //   AWEIMSendMessageController -sendMessage:conversation:forwardMessage:mentionUsers:enterFrom:
 // (聊天页组件也只是把「上下文 + 会话」转交给它)。所以只要手里有该会话的
