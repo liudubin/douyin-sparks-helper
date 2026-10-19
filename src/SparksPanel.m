@@ -1294,6 +1294,11 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
 - (void)rebuildContent;
 - (void)refreshLog;
 - (void)refreshChrome;
+- (void)spBuildConsoleTab;
+- (void)spBuildConsoleMetrics;
+- (void)spBuildConsoleButton;
+- (void)spBuildConsoleOps;
+- (UIStackView *)spConsoleRow:(NSArray<UIView *> *)tiles;
 - (void)applyAvatarInto:(UIView *)avatar;
 - (void)applyPanelBackground;
 - (void)segChangedTo:(NSInteger)idx;
@@ -2171,7 +2176,85 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
         [sub.trailingAnchor constraintLessThanOrEqualToAnchor:s.trailingAnchor constant:-16],
     ]];
     [self.stack addArrangedSubview:head];
+}
 
+#pragma mark - 控制台状态页(整体重排)
+
+- (void)spBuildConsoleTab {
+    [self spBuildConsoleHeader];    // 环形进度 + 下一轮 + 间隔
+    [self spBuildConsoleMetrics];   // 2×2 指标砖
+    [self spBuildConsoleButton];    // 主按钮
+    [self spBuildConsoleOps];       // 紧凑操作行
+}
+
+- (UIStackView *)spConsoleRow:(NSArray<UIView *> *)tiles {
+    UIStackView *row = [[UIStackView alloc] initWithArrangedSubviews:tiles];
+    row.axis = UILayoutConstraintAxisHorizontal;
+    row.distribution = UIStackViewDistributionFillEqually;
+    row.spacing = 12;
+    return row;
+}
+
+- (void)spBuildConsoleMetrics {
+    SparksConfig *cfg = [SparksConfig shared];
+    NSUInteger total = cfg.targets.count, done = 0;
+    for (NSDictionary *t in cfg.targets) if ([cfg sentToday:SpTargetKeyOf(t)]) done++;
+
+    SparksGlassCard *card = [[SparksGlassCard alloc] initWithCardTitle:nil];
+    UIView *s = card.surface;
+
+    UIView *(^tile)(NSString *, NSString *, UIColor *) = ^UIView *(NSString *title, NSString *value, UIColor *vc) {
+        UIView *box = [[UIView alloc] init];
+        box.translatesAutoresizingMaskIntoConstraints = NO;
+        UILabel *t = [[UILabel alloc] init];
+        t.text = title;
+        t.font = [UIFont systemFontOfSize:11];
+        t.textColor = SpW(0.55);
+        t.translatesAutoresizingMaskIntoConstraints = NO;
+        UILabel *v = [[UILabel alloc] init];
+        v.text = value;
+        v.font = SpRounded(20, 0.6);
+        v.textColor = vc;
+        v.translatesAutoresizingMaskIntoConstraints = NO;
+        [box addSubview:t];
+        [box addSubview:v];
+        [NSLayoutConstraint activateConstraints:@[
+            [t.leadingAnchor constraintEqualToAnchor:box.leadingAnchor],
+            [t.topAnchor constraintEqualToAnchor:box.topAnchor],
+            [v.leadingAnchor constraintEqualToAnchor:box.leadingAnchor],
+            [v.topAnchor constraintEqualToAnchor:t.bottomAnchor constant:4],
+            [v.bottomAnchor constraintEqualToAnchor:box.bottomAnchor],
+        ]];
+        return box;
+    };
+
+    UIColor *doneColor = (total && done >= total) ? [UIColor systemGreenColor] : [UIColor whiteColor];
+    UIStackView *r1 = [self spConsoleRow:@[
+        tile(@"今日已发", [NSString stringWithFormat:@"%lu/%lu", (unsigned long)done, (unsigned long)total], doneColor),
+        tile(@"待发", [NSString stringWithFormat:@"%lu", (unsigned long)(total - done)], SpAccent()),
+    ]];
+    UIStackView *r2 = [self spConsoleRow:@[
+        tile(@"下一轮", SpFormatHM(cfg.todayEffectiveTime ?: cfg.dailyTime), [UIColor whiteColor]),
+        tile(@"发送间隔", [NSString stringWithFormat:@"%.2fs", cfg.interval], [UIColor whiteColor]),
+    ]];
+    r1.translatesAutoresizingMaskIntoConstraints = NO;
+    r2.translatesAutoresizingMaskIntoConstraints = NO;
+    UIStackView *grid = [[UIStackView alloc] initWithArrangedSubviews:@[r1, r2]];
+    grid.axis = UILayoutConstraintAxisVertical;
+    grid.spacing = 14;
+    grid.translatesAutoresizingMaskIntoConstraints = NO;
+    [s addSubview:grid];
+    [NSLayoutConstraint activateConstraints:@[
+        [grid.leadingAnchor constraintEqualToAnchor:s.leadingAnchor constant:16],
+        [grid.trailingAnchor constraintEqualToAnchor:s.trailingAnchor constant:-16],
+        [grid.topAnchor constraintEqualToAnchor:s.topAnchor constant:14],
+        [grid.bottomAnchor constraintEqualToAnchor:s.bottomAnchor constant:-14],
+    ]];
+    [self.stack addArrangedSubview:card];
+}
+
+- (void)spBuildConsoleButton {
+    __weak typeof(self) ws = self;
     SparksCapsuleButton *go = [[SparksCapsuleButton alloc] initWithTitle:@"立即续火花" icon:@"flame.fill" primary:YES];
     go.onTap = ^{
         typeof(self) s2 = ws;
@@ -2180,12 +2263,41 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
         [[SparksEngine shared] runDailyNow:YES];
         dispatch_async(dispatch_get_main_queue(), ^{ [s2 scheduleRebuild]; });
     };
-    UIStackView *row = [[UIStackView alloc] init];
+    UIStackView *row = [[UIStackView alloc] initWithArrangedSubviews:@[go]];
     row.axis = UILayoutConstraintAxisHorizontal;
     row.distribution = UIStackViewDistributionFillEqually;
-    row.translatesAutoresizingMaskIntoConstraints = NO;
-    [row addArrangedSubview:go];
     [self.stack addArrangedSubview:row];
+}
+
+- (void)spBuildConsoleOps {
+    SparksConfig *cfg = [SparksConfig shared];
+    __weak typeof(self) ws = self;
+    SparksGlassCard *ops = [[SparksGlassCard alloc] initWithCardTitle:nil];
+    [ops addRow:[SparksInfoRow switchWithTitle:@"总开关" on:cfg.master onChange:^(BOOL on) {
+        SparksConfig *c = [SparksConfig shared];
+        c.master = on;
+        [c save];
+        SparksLog(@"总开关:%@", on ? @"开" : @"关");
+        typeof(self) s = ws;
+        if (s) dispatch_async(dispatch_get_main_queue(), ^{ [s scheduleRebuild]; });
+    }]];
+    [ops addRow:SpRowSeparator()];
+    [ops addRow:[SparksInfoRow actionWithTitle:@"目标"
+                                        value:[NSString stringWithFormat:@"%lu 个", (unsigned long)cfg.targets.count]
+                                        onTap:^{
+        typeof(self) s = ws;
+        if (s) [s segChangedTo:1];
+    }]];
+    [ops addRow:SpRowSeparator()];
+    [ops addRow:[SparksInfoRow actionWithTitle:@"定时"
+                                        value:SpFormatHM(cfg.todayEffectiveTime ?: cfg.dailyTime)
+                                        onTap:^{
+        typeof(self) s = ws;
+        if (s) [s segChangedTo:3];
+    }]];
+    [ops addRow:SpRowSeparator()];
+    [ops addRow:[SparksInfoRow infoWithTitle:@"发送方式" value:@"免跳页直发"]];
+    [self.stack addArrangedSubview:ops];
 }
 
 #pragma mark - 目标卡片流(v2.19.0)
@@ -2285,8 +2397,11 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
     SparksEngine *eng = [SparksEngine shared];
     __weak typeof(self) ws = self;
 
-    // 控制台风格:首屏先给环形进度 + 一键发送,其余照旧往下排
-    if (SpSkinConsole()) [self spBuildConsoleHeader];
+    // 控制台风格:状态页整体重排(环形头部 → 指标砖 → 主按钮 → 紧凑操作行),不再走下面这套卡片
+    if (SpSkinConsole()) {
+        [self spBuildConsoleTab];
+        return;
+    }
 
     // 进度卡
     SparksGlassCard *hero = [[SparksGlassCard alloc] initWithCardTitle:nil];
