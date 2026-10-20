@@ -801,7 +801,6 @@ static UIColor *SpArtTitleColor(void) { return SpW(0.55); }
 
 #pragma mark - 输入行
 
-static UIView *spAddRowTile(UIView *row, NSString *title);
 
 @interface SparksFieldRow : UIView <UITextFieldDelegate>
 - (instancetype)initWithTitle:(NSString *)title
@@ -825,10 +824,9 @@ static UIView *spAddRowTile(UIView *row, NSString *title);
         _onChange = [onChange copy];
         _lastText = text ?: @"";
 
-        spAddRowTile(self, title);
         UILabel *label = SpMakeTitleLabel(title, 13);
         [self addSubview:label];
-        [label.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:58].active = YES;
+        [label.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:16].active = YES;
         [label.centerYAnchor constraintEqualToAnchor:self.centerYAnchor].active = YES;
         [label.widthAnchor constraintLessThanOrEqualToConstant:104].active = YES;
 
@@ -887,66 +885,7 @@ static UIView *spAddRowTile(UIView *row, NSString *title);
 #pragma mark - 信息行(纯展示 / 开关 / 可点击)
 
 // iOS 设置风格:行首彩色圆角小方块图标(按标题关键词自动匹配)
-static NSDictionary *spBadge(NSString *icon, UIColor *color) {
-    return @{@"i": icon, @"c": color};
-}
-static NSDictionary *spRowBadge(NSString *title) {
-    NSString *t = title.lowercaseString;
-    if ([t containsString:@"校准"] || [t containsString:@"模板"]) return spBadge(@"checkmark.seal.fill", [UIColor systemBlueColor]);
-    if ([t containsString:@"总开关"]) return spBadge(@"power", [UIColor systemGreenColor]);
-    if ([t containsString:@"媒体"] || [t containsString:@"图片"] || [t containsString:@"语音"]) return spBadge(@"photo.on.rectangle.angled", [UIColor systemTealColor]);
-    if ([t containsString:@"头像"] || [t containsString:@"昵称"] || [t containsString:@"资料"]) return spBadge(@"person.crop.circle.fill", [UIColor systemBlueColor]);
-    if ([t containsString:@"时间"] || [t containsString:@"时段"]) return spBadge(@"clock.fill", [UIColor systemOrangeColor]);
-    if ([t containsString:@"间隔"]) return spBadge(@"timer", [UIColor systemOrangeColor]);
-    if ([t containsString:@"ai"] || [t containsString:@"接口"] || [t containsString:@"预设"]) return spBadge(@"wand.and.stars", [UIColor systemPurpleColor]);
-    if ([t containsString:@"外观"] || [t containsString:@"材质"] || [t containsString:@"主题"] || [t containsString:@"玻璃"] || [t containsString:@"磨砂"] || [t containsString:@"动画"]) return spBadge(@"paintbrush.fill", [UIColor systemPinkColor]);
-    if ([t containsString:@"保活"] || [t containsString:@"后台"]) return spBadge(@"moon.fill", [UIColor systemIndigoColor]);
-    if ([t containsString:@"更新"]) return spBadge(@"arrow.down.circle.fill", [UIColor systemGreenColor]);
-    if ([t containsString:@"捐赠"] || [t containsString:@"赞赏"]) return spBadge(@"heart.fill", [UIColor systemPinkColor]);
-    if ([t containsString:@"备份"] || [t containsString:@"恢复"]) return spBadge(@"arrow.uturn.left.circle.fill", [UIColor systemGrayColor]);
-    if ([t containsString:@"日志"]) return spBadge(@"doc.text.fill", [UIColor systemGrayColor]);
-    if ([t containsString:@"悬浮球"]) return spBadge(@"circle.circle.fill", [UIColor systemBlueColor]);
-    if ([t containsString:@"面板"] || [t containsString:@"底衬"] || [t containsString:@"背景"]) return spBadge(@"rectangle.on.rectangle.angled", [UIColor systemTealColor]);
-    if ([t containsString:@"浮条"] || [t containsString:@"提示"]) return spBadge(@"bubble.left.and.bubble.right.fill", [UIColor systemTealColor]);
-    if ([t containsString:@"id"] || [t containsString:@"签名"]) return spBadge(@"person.text.rectangle.fill", [UIColor systemGrayColor]);
-    if ([t containsString:@"间隔"]) return spBadge(@"timer", [UIColor systemOrangeColor]);
-    if ([t containsString:@"字体"]) return spBadge(@"textformat", [UIColor systemPinkColor]);
-    if ([t containsString:@"文案"] || [t containsString:@"兜底"]) return spBadge(@"text.quote", [UIColor systemGrayColor]);
-    if ([t containsString:@"key"] || [t containsString:@"密钥"]) return spBadge(@"key", [UIColor systemPurpleColor]);
-    if ([t containsString:@"模型"]) return spBadge(@"cpu", [UIColor systemPurpleColor]);
-    if ([t containsString:@"链接"] || [t containsString:@"地址"]) return spBadge(@"link", [UIColor systemBlueColor]);
-    // 兜底:未匹配也给通用方块,保证每行文字左缘对齐不错位
-    return spBadge(@"slider.horizontal.3", nil);
-}
-
 // 行首 30pt 玻璃白块图标:InfoRow/FieldRow 共用,标题文字左缘统一 58pt(16+30+12)
-static UIView *spAddRowTile(UIView *row, NSString *title) {
-    NSDictionary *badge = spRowBadge(title);
-    UIView *tile = [[UIView alloc] init];
-    tile.translatesAutoresizingMaskIntoConstraints = NO;
-    tile.layer.cornerRadius = 7;
-    tile.layer.cornerCurve = kCACornerCurveContinuous;
-    tile.backgroundColor = [UIColor colorWithWhite:1 alpha:0.16];   // 玻璃白块
-    tile.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.18].CGColor;
-    tile.layer.borderWidth = 1;
-    UIImageView *ic = [[UIImageView alloc] initWithImage:
-                       [UIImage systemImageNamed:badge[@"i"]]];
-    ic.contentMode = UIViewContentModeScaleAspectFit;
-    ic.tintColor = SpW(0.92);   // 暖白图标
-    ic.translatesAutoresizingMaskIntoConstraints = NO;
-    [tile addSubview:ic];
-    [ic.centerXAnchor constraintEqualToAnchor:tile.centerXAnchor].active = YES;
-    [ic.centerYAnchor constraintEqualToAnchor:tile.centerYAnchor].active = YES;
-    [ic.widthAnchor constraintEqualToConstant:17].active = YES;
-    [ic.heightAnchor constraintEqualToConstant:17].active = YES;
-    [row addSubview:tile];
-    [tile.leadingAnchor constraintEqualToAnchor:row.leadingAnchor constant:16].active = YES;
-    [tile.centerYAnchor constraintEqualToAnchor:row.centerYAnchor].active = YES;
-    [tile.widthAnchor constraintEqualToConstant:30].active = YES;
-    [tile.heightAnchor constraintEqualToConstant:30].active = YES;
-    return tile;
-}
-
 @interface SparksInfoRow : UIView
 + (instancetype)infoWithTitle:(NSString *)title value:(NSString *)value;
 + (instancetype)switchWithTitle:(NSString *)title on:(BOOL)on
@@ -960,8 +899,8 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
 - (void)commonInitWithTitle:(NSString *)title value:(NSString *)value {
     self.translatesAutoresizingMaskIntoConstraints = NO;
 
-    CGFloat leadPad = 58;
-    spAddRowTile(self, title);
+    CGFloat leadPad = 16;   // v2.26.2:段头已在卡外,行内不再放图标方块,标题与段头左对齐
+    (void)title;
 
     UIStackView *left = [[UIStackView alloc] init];
     left.axis = UILayoutConstraintAxisVertical;
