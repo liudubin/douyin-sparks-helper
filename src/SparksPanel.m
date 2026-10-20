@@ -342,6 +342,7 @@ static UIColor *SpArtTextColor(void)  { return [UIColor whiteColor]; }
 
 @interface SparksRingGauge : UIView
 - (void)setDone:(NSUInteger)done total:(NSUInteger)total;
+- (void)setDone:(NSUInteger)done total:(NSUInteger)total animated:(BOOL)animated;
 @end
 
 @implementation SparksRingGauge {
@@ -382,13 +383,43 @@ static UIColor *SpArtTextColor(void)  { return [UIColor whiteColor]; }
 }
 
 - (void)setDone:(NSUInteger)done total:(NSUInteger)total {
-    _num.text = [NSString stringWithFormat:@"%lu/%lu", (unsigned long)done, (unsigned long)total];
+    [self setDone:done total:total animated:YES];
+}
+
+// 动效:圆环从当前值扫到新值,中间数字跟着滚
+- (void)setDone:(NSUInteger)done total:(NSUInteger)total animated:(BOOL)animated {
     CGFloat p = total ? (CGFloat)done / (CGFloat)total : 0;
     _bar.strokeColor = (total && done >= total) ? [UIColor systemGreenColor].CGColor : SpAccent().CGColor;
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
+    NSString *final = [NSString stringWithFormat:@"%lu/%lu", (unsigned long)done, (unsigned long)total];
+
+    if (!animated || !self.window) {
+        _num.text = final;
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        _bar.strokeEnd = p;
+        [CATransaction commit];
+        return;
+    }
+
+    CGFloat from = _bar.presentationLayer ? [[_bar presentationLayer] strokeEnd] : _bar.strokeEnd;
+    CABasicAnimation *sweep = [CABasicAnimation animationWithKeyPath:@"strokeEnd"];
+    sweep.fromValue = @(from);
+    sweep.toValue = @(p);
+    sweep.duration = 0.9;
+    sweep.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseOut];
     _bar.strokeEnd = p;
-    [CATransaction commit];
+    [_bar addAnimation:sweep forKey:@"spSweep"];
+
+    // 数字滚动:12 步 0.9s 走完
+    NSInteger steps = 12;
+    for (NSInteger i = 1; i <= steps; i++) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.9 * i / steps * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            NSUInteger d = (NSUInteger)((double)done * (double)i / (double)steps);
+            if (i == steps) d = done;
+            self->_num.text = [NSString stringWithFormat:@"%lu/%lu", (unsigned long)d, (unsigned long)total];
+        });
+    }
 }
 
 - (void)layoutSubviews {
@@ -1236,6 +1267,7 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
 @property (nonatomic, strong) UIView *panelRoot;
 @property (nonatomic, strong) UIView *backgroundTapView;
 @property (nonatomic, strong) UIView *donateView;
+@property (nonatomic, assign) BOOL animateNextBuild;   // 下次重建后播放入场动效
 @property (nonatomic, weak) SparksCapsuleButton *busyButton;   // 正在播放三段动画的按钮:期间冻结内容重建
 @property (nonatomic, assign) BOOL targetsManaging;   // 目标页:是否切到"管理"(删除/单独设置)模式
 @property (nonatomic, copy) NSString *detailKey;      // 目标单独设置页:正在查看的目标 key(空=列表)
@@ -1303,6 +1335,7 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
 - (void)rebuildContent;
 - (void)refreshLog;
 - (void)refreshChrome;
+- (void)spAnimateStackEntries;
 - (void)spBuildConsoleTab;
 - (void)spBuildConsoleMetrics;
 - (void)spBuildConsoleButton;
@@ -1784,6 +1817,7 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
 // 页签切换(日志页挂 2s 轮询刷新;离开目标页清掉单独设置状态)
 - (void)segChangedTo:(NSInteger)idx {
     self.tab = idx;
+    self.animateNextBuild = YES;   // 切页播一次入场
     if (idx != 1) { self.detailKey = nil; self.targetsManaging = NO; }
     [self.logTimer invalidate];
     self.logTimer = nil;
@@ -1807,6 +1841,7 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
     // 打开面板自动隐藏悬浮球
     self.ballWrapper.hidden = YES;
     [self setBallGifPlaying:NO];
+    self.animateNextBuild = YES;   // 开面板播一次入场
 
     SparksConfig *cfg = [SparksConfig shared];
     CGFloat d = 0.35 / MAX(0.3, cfg.animSpeed);
@@ -2147,6 +2182,29 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
         case 3: [self buildSettingsTab]; break;
         case 4: [self buildLogTab]; break;
         default: break;
+    }
+    if (self.animateNextBuild) {
+        self.animateNextBuild = NO;
+        [self spAnimateStackEntries];
+    }
+}
+
+#pragma mark - 动效
+
+// 动效:切页/开面板时卡片错峰上浮(45ms 一张,避免每次刷新都闪)
+- (void)spAnimateStackEntries {
+    NSUInteger i = 0;
+    for (UIView *v in [self.stack.arrangedSubviews copy]) {
+        v.alpha = 0;
+        v.transform = CGAffineTransformMakeTranslation(0, 12);
+        [UIView animateWithDuration:0.34 delay:0.045 * i
+             usingSpringWithDamping:0.88 initialSpringVelocity:0.25
+                            options:UIViewAnimationOptionCurveEaseOut | UIViewAnimationOptionBeginFromCurrentState
+                         animations:^{
+            v.alpha = 1;
+            v.transform = CGAffineTransformIdentity;
+        } completion:nil];
+        i++;
     }
 }
 
