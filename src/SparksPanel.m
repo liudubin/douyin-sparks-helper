@@ -333,7 +333,6 @@ static NSArray<NSString *> *SpAccentPresets(void) {
 
 // v2.22.0:只保留「控制台」一套布局,其余三套皮肤与风格开关已删除
 static CGFloat SpCardRadius(void) { return 20; }
-static UIColor *SpCardFill(void)  { return [UIColor colorWithWhite:0.09 alpha:0.94]; }
 static UIColor *SpCardStroke(void){ return [UIColor colorWithWhite:1 alpha:0.12]; }
 static UIColor *SpArtTitleColor(void) { return SpW(0.55); }
 
@@ -447,6 +446,7 @@ static UIColor *SpArtTitleColor(void) { return SpW(0.55); }
     UIView *_plate;               // 实底容器(圆角/描边)
     UIView *_body;                // 内容容器(等于 _plate)
     UIStackView *_stack;
+    CAGradientLayer *_grad;       // 卡片底色渐变(v2.26)
 }
 
 - (instancetype)initWithCardTitle:(NSString *)title {
@@ -460,11 +460,23 @@ static UIColor *SpArtTitleColor(void) { return SpW(0.55); }
         {
             UIView *flat = [[UIView alloc] init];
             flat.translatesAutoresizingMaskIntoConstraints = NO;
-            flat.backgroundColor = SpCardFill();
+            flat.backgroundColor = [UIColor clearColor];   // 底色交给渐变层
             flat.layer.cornerRadius = SpCardRadius();
             flat.layer.cornerCurve = kCACornerCurveContinuous;
             flat.layer.borderWidth = 1;
             flat.layer.borderColor = SpCardStroke().CGColor;
+            // v2.26:卡片底色改成纵向渐变(上 #292E36 → 下 #131519),
+            // 比原来的纯色实底多一点层次,又不会像玻璃那样抢戏
+            CAGradientLayer *grad = [CAGradientLayer layer];
+            grad.colors = @[(id)[UIColor colorWithRed:0.16 green:0.18 blue:0.21 alpha:0.97].CGColor,
+                            (id)[UIColor colorWithRed:0.075 green:0.082 blue:0.098 alpha:0.97].CGColor];
+            grad.startPoint = CGPointMake(0.5, 0);
+            grad.endPoint = CGPointMake(0.5, 1);
+            grad.cornerRadius = SpCardRadius();
+            grad.cornerCurve = kCACornerCurveContinuous;
+            [flat.layer insertSublayer:grad atIndex:0];
+            _grad = grad;
+
             [self addSubview:flat];
             _plate = flat;
             _body = flat;
@@ -528,6 +540,17 @@ static UIColor *SpArtTitleColor(void) { return SpW(0.55); }
         [_stack.leadingAnchor constraintEqualToAnchor:_body.leadingAnchor constant:14],
         [_stack.trailingAnchor constraintEqualToAnchor:_body.trailingAnchor constant:-14],
     ]];
+}
+
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    if (_grad) {
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        _grad.frame = self.bounds;
+        _grad.cornerRadius = SpCardRadius();
+        [CATransaction commit];
+    }
 }
 
 - (UIView *)surface {
