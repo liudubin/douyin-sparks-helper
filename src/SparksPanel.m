@@ -1974,7 +1974,7 @@ static UIColor *SpArtTitleColor(void) { return SpW(0.55); }
     avatar.layer.cornerCurve = kCACornerCurveContinuous;
     avatar.clipsToBounds = YES;
     [surface addSubview:avatar];
-    [avatar.leadingAnchor constraintEqualToAnchor:surface.leadingAnchor constant:14].active = YES;
+    [avatar.leadingAnchor constraintEqualToAnchor:surface.leadingAnchor constant:16].active = YES;
     [avatar.widthAnchor constraintEqualToConstant:40].active = YES;
     [self applyAvatarInto:avatar];
 
@@ -2299,14 +2299,14 @@ static UIColor *SpArtTitleColor(void) { return SpW(0.55); }
 
         [line.leadingAnchor constraintEqualToAnchor:s.leadingAnchor constant:16],
         [line.trailingAnchor constraintEqualToAnchor:s.trailingAnchor constant:-16],
-        [line.topAnchor constraintEqualToAnchor:gauge.bottomAnchor constant:14],
+        [line.topAnchor constraintEqualToAnchor:gauge.bottomAnchor constant:16],
         [line.heightAnchor constraintEqualToConstant:0.5],
 
         [k1.leadingAnchor constraintEqualToAnchor:s.leadingAnchor constant:16],
         [k1.topAnchor constraintEqualToAnchor:line.bottomAnchor constant:12],
         [v1.leadingAnchor constraintEqualToAnchor:k1.leadingAnchor],
         [v1.topAnchor constraintEqualToAnchor:k1.bottomAnchor constant:2],
-        [v1.bottomAnchor constraintEqualToAnchor:s.bottomAnchor constant:-14],
+        [v1.bottomAnchor constraintEqualToAnchor:s.bottomAnchor constant:-16],
 
         [k2.leadingAnchor constraintGreaterThanOrEqualToAnchor:v1.trailingAnchor constant:40],
         [k2.topAnchor constraintEqualToAnchor:k1.topAnchor],
@@ -2536,8 +2536,8 @@ static UIColor *SpArtTitleColor(void) { return SpW(0.55); }
         [avatar.centerYAnchor constraintEqualToAnchor:s.centerYAnchor],
         [avatar.widthAnchor constraintEqualToConstant:44],
         [avatar.heightAnchor constraintEqualToConstant:44],
-        [avatar.topAnchor constraintEqualToAnchor:s.topAnchor constant:14],
-        [avatar.bottomAnchor constraintEqualToAnchor:s.bottomAnchor constant:-14],
+        [avatar.topAnchor constraintEqualToAnchor:s.topAnchor constant:16],
+        [avatar.bottomAnchor constraintEqualToAnchor:s.bottomAnchor constant:-16],
         [initial.centerXAnchor constraintEqualToAnchor:avatar.centerXAnchor],
         [initial.centerYAnchor constraintEqualToAnchor:avatar.centerYAnchor],
         [title.leadingAnchor constraintEqualToAnchor:avatar.trailingAnchor constant:12],

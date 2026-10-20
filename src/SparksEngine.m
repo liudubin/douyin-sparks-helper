@@ -1476,7 +1476,7 @@ static NSString *SpDisplayName(NSDictionary *target) {
         }
         UIViewController *top = [self topViewController];
         UIViewController *found = [self findChatVCFrom:top depth:0];
-        if (found) {
+        if (found && [found respondsToSelector:@selector(getInputViewController)]) {
             [found performSelector:@selector(getInputViewController)];
             if (self.pollingKey.length) SparksLog(@"👆 已拉起输入栈(视图树搜索)");
             return;
@@ -1519,7 +1519,13 @@ static NSString *SpDisplayName(NSDictionary *target) {
         return;
     }
     NSAttributedString *as = [[NSAttributedString alloc] initWithString:text];
-    [ctx performSelector:@selector(setContent:) withObject:as];
+    if ([ctx respondsToSelector:@selector(setContent:)]) {
+        [ctx performSelector:@selector(setContent:) withObject:as];
+    } else {
+        SparksLog(@"⚠️ 发送上下文不支持 setContent:,放弃本次直发");
+        if (done) done(NO);
+        return;
+    }
     SparksConfig *cfg = self.config;
     if (cfg.relayUserInfo) {
         id ui = cfg.sendTemplate[@"userInfo"];
