@@ -537,9 +537,9 @@ static UIColor *SpArtTitleColor(void) { return SpW(0.55); }
     [NSLayoutConstraint activateConstraints:@[
         [_stack.topAnchor constraintEqualToAnchor:_body.topAnchor constant:6],
         [_stack.bottomAnchor constraintEqualToAnchor:_body.bottomAnchor constant:-6],
-        // v2.14:行内容离卡片边框留 14pt(与卡片边距一致),不再贴边
-        [_stack.leadingAnchor constraintEqualToAnchor:_body.leadingAnchor constant:14],
-        [_stack.trailingAnchor constraintEqualToAnchor:_body.trailingAnchor constant:-14],
+        // v2.27.1:卡内不再额外缩进,统一由每行自己留 16pt,和卡外段头对齐
+        [_stack.leadingAnchor constraintEqualToAnchor:_body.leadingAnchor constant:0],
+        [_stack.trailingAnchor constraintEqualToAnchor:_body.trailingAnchor constant:0],
     ]];
 }
 
@@ -854,7 +854,7 @@ static UIColor *SpArtTitleColor(void) { return SpW(0.55); }
         _tf.rightViewMode = UITextFieldViewModeAlways;
         [self addSubview:_tf];
         [_tf.leadingAnchor constraintEqualToAnchor:label.trailingAnchor constant:10].active = YES;
-        [_tf.trailingAnchor constraintEqualToAnchor:self.trailingAnchor].active = YES;
+        [_tf.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-16].active = YES;
         [_tf.centerYAnchor constraintEqualToAnchor:self.centerYAnchor].active = YES;
         [_tf.heightAnchor constraintEqualToConstant:34].active = YES;
 
@@ -934,7 +934,7 @@ static UIColor *SpArtTitleColor(void) { return SpW(0.55); }
     sw.onTintColor = SpAccent();
     sw.translatesAutoresizingMaskIntoConstraints = NO;
     [row addSubview:sw];
-    [sw.trailingAnchor constraintEqualToAnchor:row.trailingAnchor].active = YES;
+    [sw.trailingAnchor constraintEqualToAnchor:row.trailingAnchor constant:-16].active = YES;
     [sw.centerYAnchor constraintEqualToAnchor:row.centerYAnchor].active = YES;
     [sw addTarget:row action:@selector(spSwitchChanged:) forControlEvents:UIControlEventValueChanged];
     objc_setAssociatedObject(row, "sw", sw, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -952,7 +952,7 @@ static UIColor *SpArtTitleColor(void) { return SpW(0.55); }
     chev.contentMode = UIViewContentModeScaleAspectFit;
     chev.translatesAutoresizingMaskIntoConstraints = NO;
     [row addSubview:chev];
-    [chev.trailingAnchor constraintEqualToAnchor:row.trailingAnchor constant:2].active = YES;
+    [chev.trailingAnchor constraintEqualToAnchor:row.trailingAnchor constant:-16].active = YES;
     [chev.centerYAnchor constraintEqualToAnchor:row.centerYAnchor].active = YES;
     [chev.widthAnchor constraintEqualToConstant:12].active = YES;
     [chev.heightAnchor constraintEqualToConstant:12].active = YES;
@@ -2350,13 +2350,13 @@ static UIColor *SpArtTitleColor(void) { return SpW(0.55); }
         v.translatesAutoresizingMaskIntoConstraints = NO;
         [box addSubview:v];
         [NSLayoutConstraint activateConstraints:@[
-            [iv.leadingAnchor constraintEqualToAnchor:box.leadingAnchor constant:14],
+            [iv.leadingAnchor constraintEqualToAnchor:box.leadingAnchor constant:16],
             [iv.topAnchor constraintEqualToAnchor:box.topAnchor constant:13],
             [iv.widthAnchor constraintEqualToConstant:16],
             [iv.heightAnchor constraintEqualToConstant:16],
             [t.leadingAnchor constraintEqualToAnchor:iv.trailingAnchor constant:8],
             [t.centerYAnchor constraintEqualToAnchor:iv.centerYAnchor],
-            [t.trailingAnchor constraintLessThanOrEqualToAnchor:box.trailingAnchor constant:-10],
+            [t.trailingAnchor constraintLessThanOrEqualToAnchor:box.trailingAnchor constant:-16],
             [v.leadingAnchor constraintEqualToAnchor:iv.leadingAnchor],
             [v.topAnchor constraintEqualToAnchor:iv.bottomAnchor constant:5],
             [v.bottomAnchor constraintEqualToAnchor:box.bottomAnchor constant:-12],
@@ -2387,8 +2387,8 @@ static UIColor *SpArtTitleColor(void) { return SpW(0.55); }
     grid.translatesAutoresizingMaskIntoConstraints = NO;
     [s addSubview:grid];
     [NSLayoutConstraint activateConstraints:@[
-        [grid.leadingAnchor constraintEqualToAnchor:s.leadingAnchor constant:6],
-        [grid.trailingAnchor constraintEqualToAnchor:s.trailingAnchor constant:-6],
+        [grid.leadingAnchor constraintEqualToAnchor:s.leadingAnchor constant:0],
+        [grid.trailingAnchor constraintEqualToAnchor:s.trailingAnchor constant:0],
         [grid.topAnchor constraintEqualToAnchor:s.topAnchor constant:4],
         [grid.bottomAnchor constraintEqualToAnchor:s.bottomAnchor constant:-4],
         [hline.heightAnchor constraintEqualToConstant:0.5],
