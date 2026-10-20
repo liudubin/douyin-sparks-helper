@@ -145,7 +145,8 @@ static UILabel *SpMakeTitleLabel(NSString *text, CGFloat size) {
 
 // HH:mm -> 按制式显示:24小时制原样;12小时制带 上午/中午/下午/晚上
 static NSString *SpFormatHM(NSString *hhmm) {
-    if (!hhmm.length) return hhmm;
+    // 空/非法输入必须给个可见占位,否则 stringWithFormat 里会渲染成 "(null)"
+    if (![hhmm isKindOfClass:[NSString class]] || !hhmm.length) return @"--:--";
     NSArray *pp = [hhmm componentsSeparatedByString:@":"];
     if (pp.count < 2) return hhmm;
     NSInteger h = [pp[0] integerValue];
@@ -900,7 +901,6 @@ static UIColor *SpArtTitleColor(void) { return SpW(0.55); }
     self.translatesAutoresizingMaskIntoConstraints = NO;
 
     CGFloat leadPad = 16;   // v2.26.2:段头已在卡外,行内不再放图标方块,标题与段头左对齐
-    (void)title;
 
     UIStackView *left = [[UIStackView alloc] init];
     left.axis = UILayoutConstraintAxisVertical;
@@ -1699,6 +1699,10 @@ static UIColor *SpArtTitleColor(void) { return SpW(0.55); }
     [self buildPanelIfNeeded];
     UIView *root = self.panelRoot;
     if (!root) return;
+    if (!self.panelWindow) {   // 窗口还没建:保留骨架,下次 openPanel 时会挂上去
+        [self applyBallIcon];
+        return;
+    }
     root.alpha = keepAlpha;
     root.transform = keepTf;
     if (!CGPointEqualToPoint(keepCenter, CGPointZero)) root.center = keepCenter;
@@ -2211,7 +2215,10 @@ static UIColor *SpArtTitleColor(void) { return SpW(0.55); }
     SparksConfig *cfg = [SparksConfig shared];
     SparksEngine *eng = [SparksEngine shared];
     NSUInteger total = cfg.targets.count, done = 0;
-    for (NSDictionary *t in cfg.targets) if ([cfg sentToday:SpTargetKeyOf(t)]) done++;
+    for (id t in cfg.targets) {
+        if (![t isKindOfClass:[NSDictionary class]]) continue;
+        if ([cfg sentToday:SpTargetKeyOf(t)]) done++;
+    }
 
     SparksGlassCard *card = [[SparksGlassCard alloc] initWithCardTitle:nil];
     UIView *s = card.surface;
@@ -2301,10 +2308,11 @@ static UIColor *SpArtTitleColor(void) { return SpW(0.55); }
         [v1.topAnchor constraintEqualToAnchor:k1.bottomAnchor constant:2],
         [v1.bottomAnchor constraintEqualToAnchor:s.bottomAnchor constant:-14],
 
-        [k2.leadingAnchor constraintEqualToAnchor:v1.trailingAnchor constant:44],
+        [k2.leadingAnchor constraintGreaterThanOrEqualToAnchor:v1.trailingAnchor constant:40],
         [k2.topAnchor constraintEqualToAnchor:k1.topAnchor],
         [v2.leadingAnchor constraintEqualToAnchor:k2.leadingAnchor],
         [v2.topAnchor constraintEqualToAnchor:v1.topAnchor],
+        [v2.trailingAnchor constraintLessThanOrEqualToAnchor:s.trailingAnchor constant:-16],
     ]];
 
     [self.stack addArrangedSubview:card];
@@ -2490,7 +2498,9 @@ static UIColor *SpArtTitleColor(void) { return SpW(0.55); }
     avatar.layer.cornerCurve = kCACornerCurveContinuous;
     [s addSubview:avatar];
     UILabel *initial = [[UILabel alloc] init];
-    initial.text = [name substringToIndex:1];
+    // 昵称可能是 emoji:substringToIndex:1 会把代理对劈开,取组合字符序列才不会出现乱码方块
+    NSRange firstChar = [name rangeOfComposedCharacterSequenceAtIndex:0];
+    initial.text = firstChar.length ? [name substringWithRange:firstChar] : @"?";
     initial.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
     initial.textColor = tint;
     initial.textAlignment = NSTextAlignmentCenter;

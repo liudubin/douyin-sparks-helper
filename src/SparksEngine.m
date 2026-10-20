@@ -521,7 +521,16 @@ static NSMutableSet *SpTTSPool(void) {
     self.currentChatVM = vm;
     // 存下会话模型本体:免跳页直发时直接复用,不必再打开聊天页
     if (key.length && conv) {
-        @synchronized (self.conversations) { self.conversations[key] = conv; }
+        @synchronized (self.conversations) {
+            self.conversations[key] = conv;
+            // 封顶:这是常驻进程,历史会话对象(抖音模型)持有没有意义,只会涨内存
+            if (self.conversations.count > 64) {
+                NSArray *keys = [self.conversations allKeys];
+                for (NSUInteger i = 0; i < keys.count / 2; i++) {
+                    [self.conversations removeObjectForKey:keys[i]];
+                }
+            }
+        }
     }
     // 轮询窗口内打印绑定事件:定位"聊天页就绪超时"到底断在会话绑定还是组件注册
     if (key.length && self.pollingKey.length) {
@@ -1199,16 +1208,25 @@ static NSString *SpDisplayName(NSDictionary *target) {
 - (void)openChatAndSendToTarget:(NSDictionary *)target
                            text:(NSString *)text
                      completion:(void (^)(BOOL ok))done {
-    if (![SparksLicense isActive]) { if (done) done(NO); return; }
+    // 一次性收口:轮询/超时/异常/直发多路都可能回调,重复 done 会让 advance() 跑两次,
+    // 结果就是"同一个目标发完,下一条目标被连发两遍"。
+    __block BOOL spFired = NO;
+    void (^spDone)(BOOL) = ^(BOOL ok) {
+        if (spFired) return;
+        spFired = YES;
+        if (done) done(ok);
+    };
+
+    if (![SparksLicense isActive]) { spDone(NO); return; }
     NSString *key = SpTargetKey(target);
-    if (!key.length) { if (done) done(NO); return; }
+    if (!key.length) { spDone(NO); return; }
 
     UIApplication *app = UIApplication.sharedApplication;
     if (app.applicationState != UIApplicationStateActive) {
         SparksConfig *cfgNow = self.config;
         if (!(cfgNow.keepAlive && cfgNow.backgroundSend)) {
             SparksLog(@"⚠️ 应用不在前台且未开后台续火花,跳过 %@", SpDisplayName(target));
-            if (done) done(NO);
+            spDone(NO);
             return;
         }
         SparksLog(@"🌙 后台执行(保活模式):%@", SpDisplayName(target));
@@ -1567,7 +1585,7 @@ static NSString *SpConversationKey(id conv) {
     @synchronized (self.conversations) {
         for (id conv in list) {
             NSString *k = SpConversationKey(conv);
-            if (k.length && !self.conversations[k]) {
+            if (k.length && !self.conversations[k] && self.conversations.count < 64) {
                 self.conversations[k] = conv;
                 added++;
             }
