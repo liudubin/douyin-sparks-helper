@@ -516,9 +516,20 @@ static UIColor *SpArtTextColor(void)  { return [UIColor whiteColor]; }
 @interface SparksCapsuleButton : UIControl
 - (instancetype)initWithTitle:(NSString *)title icon:(NSString *)sysImageName primary:(BOOL)primary;
 @property (nonatomic, copy) void (^onTap)(void);
+/// 容器注入的宽度约束 —— 三段动画第二步靠它把按钮宽度收成圆
+@property (nonatomic, strong) NSLayoutConstraint *collapseWidth;
+/// 三段变化:文字淡出 → 宽度收纳成圆形 → 中心出现旋转圆环
+- (void)startLoading;
+- (void)stopLoading;
 @end
 
-@implementation SparksCapsuleButton
+@implementation SparksCapsuleButton {
+    UIStackView *_btInner;      // 图标 + 文字
+    UIView *_btPlate;           // 底色层(渐变/描边)
+    CAShapeLayer *_btRing;      // 加载圆环
+    BOOL _btLoading;
+    CGFloat _btRestWidth;       // 收纳前的宽度
+}
 
 - (instancetype)initWithTitle:(NSString *)title icon:(NSString *)sysImageName primary:(BOOL)primary {
     self = [super initWithFrame:CGRectMake(0, 0, 200, 48)];
@@ -594,6 +605,8 @@ static UIColor *SpArtTextColor(void)  { return [UIColor whiteColor]; }
         label.translatesAutoresizingMaskIntoConstraints = NO;
         [inner addArrangedSubview:label];
 
+        _btInner = inner;
+        _btPlate = plate;
         [self.heightAnchor constraintEqualToConstant:48].active = YES;
 
         [self addTarget:self action:@selector(spPressedDown) forControlEvents:UIControlEventTouchDown];
@@ -614,6 +627,88 @@ static UIColor *SpArtTextColor(void)  { return [UIColor whiteColor]; }
                                                             byRoundingCorners:UIRectCornerAllCorners
                                                                   cornerRadii:CGSizeMake(14, 14)].CGPath;
     }
+}
+
+#pragma mark 三段变化:文字淡出 → 收成圆 → 旋转圆环
+
+- (void)startLoading {
+    if (_btLoading) return;
+    _btLoading = YES;
+    self.enabled = NO;   // 加载中不再响应点击
+
+    // ① 文字/图标淡出
+    [UIView animateWithDuration:0.14 delay:0 options:UIViewAnimationOptionCurveEaseIn animations:^{
+        self->_btInner.alpha = 0;
+        self->_btInner.transform = CGAffineTransformMakeScale(0.86, 0.86);
+    } completion:^(BOOL finished) {
+        if (!self->_btLoading) return;
+        // ② 宽度收纳成圆形(高度 48 → 宽度也收到 48)
+        self->_btRestWidth = self.collapseWidth ? self.collapseWidth.constant : self.bounds.size.width;
+        if (self.collapseWidth) self.collapseWidth.constant = 48;
+
+        CABasicAnimation *round = [CABasicAnimation animationWithKeyPath:@"cornerRadius"];
+        round.fromValue = @(self->_btPlate.layer.cornerRadius);
+        round.toValue = @24;
+        round.duration = 0.28;
+        round.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut];
+        self->_btPlate.layer.cornerRadius = 24;
+        [self->_btPlate.layer addAnimation:round forKey:@"spRound"];
+
+        [UIView animateWithDuration:0.28 delay:0
+             usingSpringWithDamping:0.84 initialSpringVelocity:0.4
+                            options:UIViewAnimationOptionCurveEaseInOut
+                         animations:^{ [self.superview layoutIfNeeded]; }
+                         completion:^(BOOL done) {
+            if (!self->_btLoading) return;
+            [self spShowRing];   // ③ 中心出现旋转圆环
+        }];
+    }];
+}
+
+- (void)spShowRing {
+    CGSize size = self.bounds.size;
+    if (!_btRing) {
+        _btRing = [CAShapeLayer layer];
+        _btRing.fillColor = UIColor.clearColor.CGColor;
+        _btRing.lineWidth = 2.5;
+        _btRing.lineCap = kCALineCapRound;
+        _btRing.strokeEnd = 0.72;
+        _btRing.opacity = 0;
+        [self.layer addSublayer:_btRing];
+    }
+    _btRing.frame = CGRectMake(0, 0, size.width, size.height);
+    CGFloat radius = MIN(size.width, size.height) / 2 - 6;
+    _btRing.path = [UIBezierPath bezierPathWithArcCenter:CGPointMake(size.width / 2, size.height / 2)
+                                                  radius:MAX(6, radius)
+                                              startAngle:-M_PI_2
+                                                endAngle:M_PI_2 * 3
+                                               clockwise:YES].CGPath;
+    UIColor *tint = objc_getAssociatedObject(self, "ontint") ?: [UIColor whiteColor];
+    _btRing.strokeColor = tint.CGColor;
+    [_btRing removeAnimationForKey:@"spSpin"];
+    CABasicAnimation *spin = [CABasicAnimation animationWithKeyPath:@"transform.rotation.z"];
+    spin.fromValue = @0;
+    spin.toValue = @(M_PI * 2);
+    spin.duration = 0.9;
+    spin.repeatCount = HUGE_VALF;
+    [_btRing addAnimation:spin forKey:@"spSpin"];
+    [UIView animateWithDuration:0.18 animations:^{ self->_btRing.opacity = 1; }];
+}
+
+- (void)stopLoading {
+    if (!_btLoading) return;
+    _btLoading = NO;
+    [_btRing removeAnimationForKey:@"spSpin"];
+    _btRing.opacity = 0;
+    if (self.collapseWidth) self.collapseWidth.constant = _btRestWidth;
+    _btPlate.layer.cornerRadius = 14;
+    [UIView animateWithDuration:0.22 animations:^{
+        self->_btInner.alpha = 1;
+        self->_btInner.transform = CGAffineTransformIdentity;
+        [self.superview layoutIfNeeded];
+    } completion:^(BOOL finished) {
+        self.enabled = YES;
+    }];
 }
 
 - (void)spPressedDown {
@@ -2170,17 +2265,30 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
 - (void)spBuildConsoleButton {
     __weak typeof(self) ws = self;
     SparksCapsuleButton *go = [[SparksCapsuleButton alloc] initWithTitle:@"立即续火花" icon:@"flame.fill" primary:YES];
+    // 容器负责撑满一行;按钮自己用宽度约束,收缩时居中变圆
+    UIView *wrap = [[UIView alloc] init];
+    wrap.translatesAutoresizingMaskIntoConstraints = NO;
+    [wrap addSubview:go];
+    NSLayoutConstraint *widthC = [go.widthAnchor constraintEqualToAnchor:wrap.widthAnchor];
+    go.collapseWidth = widthC;
+    [NSLayoutConstraint activateConstraints:@[
+        [go.topAnchor constraintEqualToAnchor:wrap.topAnchor],
+        [go.bottomAnchor constraintEqualToAnchor:wrap.bottomAnchor],
+        [go.centerXAnchor constraintEqualToAnchor:wrap.centerXAnchor],
+        widthC,
+    ]];
+    __weak SparksCapsuleButton *weakGo = go;
     go.onTap = ^{
         typeof(self) s2 = ws;
         if (!s2) return;
+        [weakGo startLoading];            // ① 文字淡出 ② 收成圆 ③ 旋转圆环
         [[SparksConfig shared] save];
         [[SparksEngine shared] runDailyNow:YES];
-        dispatch_async(dispatch_get_main_queue(), ^{ [s2 scheduleRebuild]; });
+        // 留够动画时间再重建面板(重建会把这个按钮换回常态)
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.4 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{ [s2 scheduleRebuild]; });
     };
-    UIStackView *row = [[UIStackView alloc] initWithArrangedSubviews:@[go]];
-    row.axis = UILayoutConstraintAxisHorizontal;
-    row.distribution = UIStackViewDistributionFillEqually;
-    [self.stack addArrangedSubview:row];
+    [self.stack addArrangedSubview:wrap];
 }
 
 - (void)spBuildConsoleOps {
