@@ -2023,19 +2023,8 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
     [nameL.trailingAnchor constraintLessThanOrEqualToAnchor:close.leadingAnchor constant:-8].active = YES;
 
     // v2.19.5:头部也是"所有 tab 共用"的,必须一起换 —— 新风格收起头像块,改标题式头部
-    {
-        avatar.hidden = YES;
-        nameL.hidden = YES;
-        UILabel *t = [[UILabel alloc] init];
-        t.text = @"续火花";
-        t.font = [UIFont systemFontOfSize:20 weight:UIFontWeightBold];
-        t.textColor = SpArtTextColor();
-        t.textAlignment = NSTextAlignmentLeft;
-        t.translatesAutoresizingMaskIntoConstraints = NO;
-        [surface addSubview:t];
-        [t.centerYAnchor constraintEqualToAnchor:surface.centerYAnchor].active = YES;
-        [t.leadingAnchor constraintEqualToAnchor:surface.leadingAnchor constant:16].active = YES;
-    }
+    // v2.25.1:头部恢复用户自己的头像 + 昵称(之前为"标题式头部"把它们藏了,
+    // 面板里设置的头像/昵称/签名就不显示了)
 
     // 授权专属 ID 徽标已随授权校验一并移除(v2.18.1)
     if (cfg.signature.length) {
