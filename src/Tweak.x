@@ -151,6 +151,12 @@ static void SparksLogVersions(void) {
 // 免跳页直发则自己带会话模型调它。钩住取回执,面板才能区分"投递"和"真进会话"。
 %hook AWEIMSendMessageController
 
+- (instancetype)init {
+    id r = %orig;
+    if (r) [[SparksEngine shared] noteSendController:r];   // 复用 App 的实例(自带依赖)
+    return r;
+}
+
 - (id)sendMessage:(id)context
      conversation:(id)conversation
    forwardMessage:(BOOL)forwardMessage

@@ -462,7 +462,7 @@ static UIColor *SpArtTextColor(void) {
             _plate = flat;
             _body = flat;
             // 清单风格:标题移到白卡外面,白卡顶部让出 26pt 给段头
-            CGFloat plateTop = (SpSkinList() && title.length) ? 26 : 0;
+            CGFloat plateTop = (SpSkinFlat() && title.length) ? 26 : 0;
             [NSLayoutConstraint activateConstraints:@[
                 [flat.topAnchor constraintEqualToAnchor:self.topAnchor constant:plateTop],
                 [flat.bottomAnchor constraintEqualToAnchor:self.bottomAnchor],
@@ -498,8 +498,8 @@ static UIColor *SpArtTextColor(void) {
             ]];
         }
 
-        if (title.length && SpSkinList()) {
-            // 清单风格:标题作为段头贴在白卡上方(系统分组列表的观感)
+        if (title.length && SpSkinFlat()) {
+            // 1/2/3 风格:标题搬到卡外做段头(清单=浅色分组列表,控制台/卡片流=深色分组)
             UILabel *sec = [[UILabel alloc] init];
             sec.text = title;
             sec.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
@@ -2199,7 +2199,6 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
 - (void)spBuildConsoleHeader {
     SparksConfig *cfg = [SparksConfig shared];
     SparksEngine *eng = [SparksEngine shared];
-    __weak typeof(self) ws = self;
 
     NSUInteger done = 0;
     for (NSDictionary *t in cfg.targets) if ([cfg sentToday:SpTargetKeyOf(t)]) done++;

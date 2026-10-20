@@ -283,6 +283,9 @@ static NSMutableSet *SpTTSPool(void) {
 // AWEIMSendMessageController 的入参是"上下文 + 会话对象",而会话对象只能从
 // setConversation: 钩子里拿到。没缓存过就退回打开聊天页那条老路。
 @property (nonatomic, strong) NSMutableDictionary *conversations;
+// App 自己创建的发送控制器。免跳页直发优先复用它:自建实例常常缺依赖,
+// 调 sendMessage:conversation:... 返回 nil —— 现象就是"后台拉不起组件,只能跳聊天页"。
+@property (nonatomic, weak) id sendController;
 @property (nonatomic, copy) NSString *pollingKey;   // 正在等待就绪的目标(诊断日志窗口)
 @property (nonatomic, strong) id currentChatVM;   // 最近绑定的聊天页 VM 本体(组件中心兜底用)
 @property (nonatomic, strong) id pendingComponent;   // 会话未绑定时先到的发送组件(挂起等绑定)
@@ -1531,11 +1534,24 @@ static NSString *SpConversationKey(id conv) {
     Class ctrlCls = NSClassFromString(@"AWEIMSendMessageController");
     Class ctxCls = ClsSendContext();
     id conv = nil;
-    @synchronized (self.conversations) { conv = self.conversations[key]; }
+    NSUInteger cached = 0;
+    @synchronized (self.conversations) {
+        conv = self.conversations[key];
+        cached = self.conversations.count;
+    }
     if (!ctrlCls || !ctxCls || !conv) {
-        SparksLog(@"⚠️ 免跳页直发缺件(controller=%@,上下文=%@,会话模型=%@),回退打开聊天页:%@",
+        SparksLog(@"⚠️ 免跳页直发缺件(controller=%@,上下文=%@,会话模型=%@/已缓存%lu个),回退打开聊天页:%@",
                   ctrlCls ? @"有" : @"缺", ctxCls ? @"有" : @"缺",
-                  conv ? @"有" : @"缺", SpDisplayName(target));
+                  conv ? @"有" : @"缺", (unsigned long)cached, SpDisplayName(target));
+        if (!cached) SparksLog(@"   会话模型缓存为空:打开一次「消息」列表页或任意聊天页即可填充");
+        return NO;
+    }
+    // 优先复用 App 自己创建过的控制器(带完整依赖);没有才自己造一个
+    id ctrl = self.sendController;
+    BOOL reusedApp = (ctrl != nil);
+    if (!ctrl) ctrl = [[ctrlCls alloc] init];
+    if (!ctrl) {
+        SparksLog(@"⚠️ 免跳页直发:发送控制器创建失败,回退打开聊天页");
         return NO;
     }
     id ctx = [[ctxCls alloc] init];
@@ -1556,7 +1572,7 @@ static NSString *SpConversationKey(id conv) {
     id msg = nil;
     @try {
         msg = ((id (*)(id, SEL, id, id, BOOL, id, id))objc_msgSend)(
-                  [[ctrlCls alloc] init],
+                  ctrl,
                   @selector(sendMessage:conversation:forwardMessage:mentionUsers:enterFrom:),
                   ctx, conv, NO, (id)nil, ef);
     } @catch (NSException *e) {
@@ -1564,7 +1580,11 @@ static NSString *SpConversationKey(id conv) {
     }
     self.inAutoSend = NO;
     self.sendAckProbe = nil;
-    if (!msg) return NO;
+    if (!msg) {
+        SparksLog(@"⚠️ 免跳页直发未受理(控制器=%@),回退打开聊天页:%@",
+                  reusedApp ? @"App实例" : @"自建实例", SpDisplayName(target));
+        return NO;
+    }
 
     SparksLog(@"📤 免跳页直发 %@[%@]:「%@」%@", SpDisplayName(target),
               SpTargetIsGroup(target) ? @"群" : @"单", text, acked ? @"(已受理)" : @"");
@@ -1578,6 +1598,12 @@ static NSString *SpConversationKey(id conv) {
 
 // 底层发送控制器收到发送请求时回调(Tweak.x 的钩子)。
 // 旧的组件钩子对免跳页路径不触发,靠这个确认"投递"确实进了发送管道。
+- (void)noteSendController:(id)controller {
+    if (!controller || controller == self.sendController) return;
+    self.sendController = controller;
+    SparksLog(@"🧩 已捕获发送控制器,后续目标可免跳页直发");
+}
+
 - (void)noteControllerSend {
     if (self.sendAckProbe) {
         void (^probe)(void) = self.sendAckProbe;

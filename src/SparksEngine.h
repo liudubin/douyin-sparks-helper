@@ -33,6 +33,9 @@
 /// hook LSIMChatListVM setConversations: 时整批缓存会话模型(免跳页直发的前置条件)
 - (void)noteConversations:(NSArray *)list;
 
+/// hook AWEIMSendMessageController 创建时回调:缓存 App 的实例供免跳页直发复用
+- (void)noteSendController:(id)controller;
+
 /// hook AWEIMSendMessageController 发送时回调(免跳页路径的发送回执)
 - (void)noteControllerSend;
 
