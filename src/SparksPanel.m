@@ -1229,6 +1229,7 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
 @property (nonatomic, strong) UIView *panelRoot;
 @property (nonatomic, strong) UIView *backgroundTapView;
 @property (nonatomic, strong) UIView *donateView;
+@property (nonatomic, assign) BOOL targetsManaging;   // 目标页:是否切到"管理"(删除/单独设置)模式
 @property (nonatomic, copy) NSString *detailKey;      // 目标单独设置页:正在查看的目标 key(空=列表)
 @end
 
@@ -1775,7 +1776,7 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
 // 页签切换(日志页挂 2s 轮询刷新;离开目标页清掉单独设置状态)
 - (void)segChangedTo:(NSInteger)idx {
     self.tab = idx;
-    if (idx != 1) self.detailKey = nil;
+    if (idx != 1) { self.detailKey = nil; self.targetsManaging = NO; }
     [self.logTimer invalidate];
     self.logTimer = nil;
     if (self.tab == 4) {
@@ -2440,12 +2441,36 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
         return;
     }
 
-    // 目标页:每人一张卡(点卡进单独设置),下面接原有管理卡片
-    if (cfg.targets.count) {
+    // 目标页:默认卡片流(每人一张卡);点「管理目标」才切到原来的可左滑删除的行列表。
+    // 两者互斥渲染 —— 之前两边都渲染,同一个目标会同时以卡片和行出现,看起来"有两个目标"。
+    if (cfg.targets.count && !self.targetsManaging) {
         for (NSDictionary *t in [cfg.targets copy]) {
             UIView *feedCard = [self spFeedCardForTarget:t];
             if (feedCard) [self.stack addArrangedSubview:feedCard];
         }
+        SparksGlassCard *manage = [[SparksGlassCard alloc] initWithCardTitle:nil];
+        __weak typeof(self) wsm = self;
+        [manage addRow:[SparksInfoRow actionWithTitle:@"管理目标(删除 / 调整)"
+                                               value:[NSString stringWithFormat:@"%lu 个 ›", (unsigned long)cfg.targets.count]
+                                               onTap:^{
+            typeof(self) s2 = wsm;
+            if (!s2) return;
+            s2.targetsManaging = YES;
+            [s2 scheduleRebuild];
+        }]];
+        [self.stack addArrangedSubview:manage];
+        return;
+    }
+    if (self.targetsManaging && cfg.targets.count) {
+        SparksGlassCard *back = [[SparksGlassCard alloc] initWithCardTitle:nil];
+        __weak typeof(self) wsb = self;
+        [back addRow:[SparksInfoRow actionWithTitle:@"← 返回目标卡片" value:@"" onTap:^{
+            typeof(self) s3 = wsb;
+            if (!s3) return;
+            s3.targetsManaging = NO;
+            [s3 scheduleRebuild];
+        }]];
+        [self.stack addArrangedSubview:back];
     }
 
     SparksGlassCard *card = [[SparksGlassCard alloc]
