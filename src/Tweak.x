@@ -162,6 +162,7 @@ static void SparksLogVersions(void) {
    forwardMessage:(BOOL)forwardMessage
      mentionUsers:(id)mentionUsers
         enterFrom:(id)enterFrom {
+    [[SparksEngine shared] noteControllerMessage:context];
     [[SparksEngine shared] noteControllerSend];
     return %orig;
 }

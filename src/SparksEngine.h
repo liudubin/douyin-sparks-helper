@@ -26,6 +26,10 @@
 /// 手动触发一次(面板按钮);force=YES 忽略今日已发去重
 - (void)runDailyNow:(BOOL)force;
 
+/// 只后台模式兜底:文本链路不通时改发语音/图片(媒体通道后台可用),不打开聊天页
+- (void)sendFallbackMediaForTarget:(NSDictionary *)target text:(NSString *)text
+                        completion:(void (^)(BOOL ok))done;
+
 /// 免跳页直发:有该会话的会话模型就走 AWEIMSendMessageController 直接投递,
 /// 不打开聊天页;返回 NO 表示条件不具备,调用方应回退到打开聊天页的老路。
 - (BOOL)sendTextWithoutPage:(NSString *)text target:(NSDictionary *)target;
@@ -35,6 +39,9 @@
 
 /// hook AWEIMSendMessageController 创建时回调:缓存 App 的实例供免跳页直发复用
 - (void)noteSendController:(id)controller;
+
+/// hook AWEIMSendMessageController 发送时回调:记录入参类型(免跳页按同类型构造)
+- (void)noteControllerMessage:(id)message;
 
 /// hook AWEIMSendMessageController 发送时回调(免跳页路径的发送回执)
 - (void)noteControllerSend;

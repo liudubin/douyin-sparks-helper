@@ -286,6 +286,10 @@ static NSMutableSet *SpTTSPool(void) {
 // App 自己创建的发送控制器。免跳页直发优先复用它:自建实例常常缺依赖,
 // 调 sendMessage:conversation:... 返回 nil —— 现象就是"后台拉不起组件,只能跳聊天页"。
 @property (nonatomic, weak) id sendController;
+// App 传给发送控制器的第一个对象(可能是 AWEIMSendMessageContext,也可能是 AWEIMMessage)。
+// 记下它的类,免跳页时按同一类型构造,避免"类型不对 → 返回 nil → 退回跳页"。
+@property (nonatomic, strong) id controllerMessageSample;
+@property (nonatomic, copy) NSString *controllerMessageClass;
 @property (nonatomic, copy) NSString *pollingKey;   // 正在等待就绪的目标(诊断日志窗口)
 @property (nonatomic, strong) id currentChatVM;   // 最近绑定的聊天页 VM 本体(组件中心兜底用)
 @property (nonatomic, strong) id pendingComponent;   // 会话未绑定时先到的发送组件(挂起等绑定)
@@ -718,6 +722,47 @@ static NSMutableSet *SpTTSPool(void) {
     if (self.onStateChange) self.onStateChange();
 }
 
+// 只后台模式:文本链路不通时的兜底 —— TTS 语音或图片,绝不打开聊天页
+- (void)sendFallbackMediaForTarget:(NSDictionary *)target text:(NSString *)text
+                        completion:(void (^)(BOOL ok))done {
+    SparksConfig *cfg = self.config;
+    NSString *voice = [target[@"voice"] isKindOfClass:[NSString class]] ? target[@"voice"] : nil;
+    BOOL ttsOn = cfg.audioTpl && (voice.length > 0 || cfg.ttsVoiceOn);
+    if (ttsOn) {
+        SparksLog(@"🎙️ 后台模式:文本链路不可用,改用语音续火花:%@", SpDisplayName(target));
+        [SparksTTSHelper synthesize:text voice:(voice.length ? voice : @"zh-CN")
+                         completion:^(NSString *path, double dur, NSString *err) {
+            if (!path) {
+                SparksLog(@"❌ 后台发送失败:%@(TTS 失败:%@),计入补发", SpDisplayName(target), err);
+                if (done) done(NO);
+                return;
+            }
+            [self sendMediaFile:path audio:YES duration:dur target:target completion:^(BOOL ok, NSString *e) {
+                if (!ok) SparksLog(@"❌ 后台发送失败:%@(%@),计入补发", SpDisplayName(target), e);
+                if (done) done(ok);
+            }];
+        }];
+        return;
+    }
+    NSString *imgPath = [target[@"imgPath"] isKindOfClass:[NSString class]] ? target[@"imgPath"] : nil;
+    NSString *pick = ([target[@"imgLock"] boolValue] && imgPath.length) ? imgPath : nil;
+    if (!pick.length) {
+        NSMutableArray *pool = [cfg.mediaFiles mutableCopy] ?: [NSMutableArray array];
+        if (imgPath.length && ![pool containsObject:imgPath]) [pool addObject:imgPath];
+        if (pool.count) pick = pool[arc4random() % (u_int)pool.count];
+    }
+    if (pick.length && cfg.mediaTpl) {
+        SparksLog(@"🖼️ 后台模式:文本链路不可用,改用图片续火花:%@", SpDisplayName(target));
+        [self sendMediaFile:pick audio:NO duration:0 target:target completion:^(BOOL ok, NSString *e) {
+            if (!ok) SparksLog(@"❌ 后台发送失败:%@(%@),计入补发", SpDisplayName(target), e);
+            if (done) done(ok);
+        }];
+        return;
+    }
+    SparksLog(@"❌ 后台发送失败:%@(文本未受理,且没有可用的语音/图片通道),计入补发", SpDisplayName(target));
+    if (done) done(NO);
+}
+
 // 媒体直发:本地文件 + 校准模板重建 context,无需打开聊天页(后台可用)
 - (void)sendMediaFile:(NSString *)path
                 audio:(BOOL)audio
@@ -989,6 +1034,16 @@ static NSString *SpDisplayName(NSDictionary *target) {
             // 免跳页优先:有该会话的会话模型就直接投递,页面完全不动
             if ([s4 sendTextWithoutPage:finalText target:target]) {
                 advance();
+                return;
+            }
+            if (s4.config.noJump) {
+                // 只后台发送:绝不打开聊天页;文本走不通就退到语音/图片
+                [s4 sendFallbackMediaForTarget:target text:finalText completion:^(BOOL ok) {
+                    typeof(self) s8 = ws;
+                    if (!s8) return;
+                    if (!ok) [s8 noteTargetFailed:target];
+                    advance();
+                }];
                 return;
             }
             [s4 openChatAndSendToTarget:target text:finalText completion:^(BOOL ok) {
@@ -1578,6 +1633,27 @@ static NSString *SpConversationKey(id conv) {
     } @catch (NSException *e) {
         SparksLog(@"⚠️ 免跳页直发异常:%@(%@)", e.name, e.reason);
     }
+    if (!msg && self.controllerMessageSample) {
+        // 第二种构造:按 App 真实传入的类型来造。日志里 🧪 那行会告诉我们它是
+        // AWEIMSendMessageContext 还是 AWEIMMessage;后者才是控制器的正牌入参。
+        @try {
+            Class sampleCls = [self.controllerMessageSample class];
+            id sample = [[sampleCls alloc] init];
+            if (sample) {
+                SpSetKV(sample, @"content", [[NSAttributedString alloc] initWithString:text]);
+                if ([sample respondsToSelector:@selector(setSendContext:)]) {
+                    [sample performSelector:@selector(setSendContext:) withObject:ctx];
+                }
+                msg = ((id (*)(id, SEL, id, id, BOOL, id, id))objc_msgSend)(
+                          ctrl,
+                          @selector(sendMessage:conversation:forwardMessage:mentionUsers:enterFrom:),
+                          sample, conv, NO, (id)nil, ef);
+                if (msg) SparksLog(@"✅ 免跳页直发改用类型 %@ 成功", NSStringFromClass(sampleCls));
+            }
+        } @catch (NSException *e2) {
+            SparksLog(@"⚠️ 免跳页直发(按入参类型构造)异常:%@(%@)", e2.name, e2.reason);
+        }
+    }
     self.inAutoSend = NO;
     self.sendAckProbe = nil;
     if (!msg) {
@@ -1598,6 +1674,15 @@ static NSString *SpConversationKey(id conv) {
 
 // 底层发送控制器收到发送请求时回调(Tweak.x 的钩子)。
 // 旧的组件钩子对免跳页路径不触发,靠这个确认"投递"确实进了发送管道。
+- (void)noteControllerMessage:(id)message {
+    if (!message) return;
+    NSString *cls = NSStringFromClass([message class]);
+    if (!cls.length || [cls isEqualToString:self.controllerMessageClass]) return;
+    self.controllerMessageClass = cls;
+    self.controllerMessageSample = message;
+    SparksLog(@"🧪 底层发送入参类型 = %@", cls);
+}
+
 - (void)noteSendController:(id)controller {
     if (!controller || controller == self.sendController) return;
     self.sendController = controller;

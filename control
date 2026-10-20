@@ -1,6 +1,6 @@
 Package: com.zhipu.sparkshelper
 Name: 抖音AI续火花助手 (Douyin Sparks Helper)
-Version: 2.20.0
+Version: 2.21.0
 Architecture: iphoneos-arm64
 Description: 抖音私信AI续火花(适配抖音 40.7.0):定时用AI生成自然问候自动发送给指定好友,维持聊天火花不断;悬浮面板管理目标/时间/AI配置
 Maintainer: liudubin

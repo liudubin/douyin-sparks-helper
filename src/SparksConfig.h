@@ -94,6 +94,7 @@ extern BOOL SparksURLOK(NSURL *url);
 // ── 外观 ──
 @property (assign) NSInteger materialMode; // 0 液态玻璃 1 玻璃 2 磨砂
 @property (assign) NSInteger uiStyle;          // 界面风格 0 玻璃 1 控制台 2 目标卡片流 3 极简清单
+@property (assign) BOOL noJump;                // 只后台发送:文本链路不通时改走语音/图片,绝不打开聊天页
 @property (copy) NSString *accentHex;      // 主题色 HEX(空=默认火焰橙)
 @property (assign) BOOL fontFollowsAccent;// 标题字体颜色跟随主题色
 @property (assign) double panelW;          // 面板宽
