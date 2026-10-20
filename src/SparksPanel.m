@@ -184,10 +184,7 @@ static NSAttributedString *SpDotTitle(NSString *name, UIColor *dotColor) {
 static UIView *SpRowSeparator(void) {
     UIView *v = [[UIView alloc] init];
     v.translatesAutoresizingMaskIntoConstraints = NO;
-    // 清单风格(uiStyle==3)在浅色底上要用深色发丝线,这里直接读配置避免依赖下方风格函数
-    v.backgroundColor = ([SparksConfig shared].uiStyle == 3)
-        ? [UIColor colorWithWhite:0 alpha:0.08]
-        : [UIColor colorWithWhite:1 alpha:0.07];
+    v.backgroundColor = [UIColor colorWithWhite:1 alpha:0.07];
     [v.heightAnchor constraintEqualToConstant:0.5].active = YES;
     return v;
 }
@@ -334,30 +331,12 @@ static NSArray<NSString *> *SpAccentPresets(void) {
 
 #pragma mark - 界面风格(v2.19.0:同一套面板,四种皮)
 
-// 0 玻璃(现状) 1 控制台 2 目标卡片流 3 极简清单
-static NSInteger SpUIStyle(void) {
-    NSInteger v = [SparksConfig shared].uiStyle;
-    return (v < 0 || v > 3) ? 0 : v;
-}
-static BOOL SpSkinFlat(void)    { return SpUIStyle() != 0; }   // 1/2/3 不用玻璃
-static BOOL SpSkinList(void)    { return SpUIStyle() == 3; }   // 白底分组清单
-static BOOL SpSkinConsole(void) { return SpUIStyle() == 1; }
-static BOOL SpSkinFeed(void)    { return SpUIStyle() == 2; }
-static CGFloat SpCardRadius(void) { return SpSkinList() ? 12 : (SpSkinFlat() ? 20 : 18); }
-static UIColor *SpCardFill(void) {
-    return SpSkinList() ? [UIColor colorWithWhite:0.985 alpha:1.0]
-                        : [UIColor colorWithWhite:0.09 alpha:0.94];
-}
-static UIColor *SpCardStroke(void) {
-    return SpSkinList() ? [UIColor colorWithWhite:0 alpha:0.07]
-                        : [UIColor colorWithWhite:1 alpha:0.12];
-}
-static UIColor *SpArtTitleColor(void) {
-    return SpSkinList() ? [UIColor colorWithWhite:0.42 alpha:1] : SpW(0.55);
-}
-static UIColor *SpArtTextColor(void) {
-    return SpSkinList() ? [UIColor colorWithWhite:0.10 alpha:1] : [UIColor whiteColor];
-}
+// v2.22.0:只保留「控制台」一套布局,其余三套皮肤与风格开关已删除
+static CGFloat SpCardRadius(void) { return 20; }
+static UIColor *SpCardFill(void)  { return [UIColor colorWithWhite:0.09 alpha:0.94]; }
+static UIColor *SpCardStroke(void){ return [UIColor colorWithWhite:1 alpha:0.12]; }
+static UIColor *SpArtTitleColor(void) { return SpW(0.55); }
+static UIColor *SpArtTextColor(void)  { return [UIColor whiteColor]; }
 
 #pragma mark - 环形进度(控制台风格首屏)
 
@@ -435,9 +414,8 @@ static UIColor *SpArtTextColor(void) {
 @end
 
 @implementation SparksGlassCard {
-    UIVisualEffectView *_glass;   // 液态玻璃本体(仅风格 0)
-    UIView *_plate;               // 裁切容器(圆角/描边)
-    UIView *_body;                // 内容容器:玻璃=contentView,实底=plate 本身
+    UIView *_plate;               // 实底容器(圆角/描边)
+    UIView *_body;                // 内容容器(等于 _plate)
     UIStackView *_stack;
 }
 
@@ -449,8 +427,7 @@ static UIColor *SpArtTextColor(void) {
         self.layer.cornerCurve = kCACornerCurveContinuous;
         // v2.14.2:卡片不加投影(用户报"边缘方形阴影";玻璃卡直浮视频更干净,也省 GPU)
 
-        if (SpSkinFlat()) {
-            // 风格 1/2/3:不用玻璃,直接实底 + 细描边。列表风格是浅色,其余是近黑。
+        {
             UIView *flat = [[UIView alloc] init];
             flat.translatesAutoresizingMaskIntoConstraints = NO;
             flat.backgroundColor = SpCardFill();
@@ -461,45 +438,17 @@ static UIColor *SpArtTextColor(void) {
             [self addSubview:flat];
             _plate = flat;
             _body = flat;
-            // 清单风格:标题移到白卡外面,白卡顶部让出 26pt 给段头
-            CGFloat plateTop = (SpSkinFlat() && title.length) ? 26 : 0;
+            CGFloat plateTop = title.length ? 26 : 0;   // 标题在卡外,顶部让出段头高度
             [NSLayoutConstraint activateConstraints:@[
                 [flat.topAnchor constraintEqualToAnchor:self.topAnchor constant:plateTop],
                 [flat.bottomAnchor constraintEqualToAnchor:self.bottomAnchor],
                 [flat.leadingAnchor constraintEqualToAnchor:self.leadingAnchor],
                 [flat.trailingAnchor constraintEqualToAnchor:self.trailingAnchor],
             ]];
-        } else {
-            _glass = SpMakeGlassView();
-            _plate = SpGlassWrap(_glass, 18);   // 圆角统一 18(top栏/按钮行一致,大圆角会吃按钮空间)
-            _plate.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.16].CGColor;   // 玻璃卡白描边
-            _plate.layer.borderWidth = 1;
-            _body = _glass.contentView;
-            [self addSubview:_plate];
-            [NSLayoutConstraint activateConstraints:@[
-                [_plate.topAnchor constraintEqualToAnchor:self.topAnchor],
-                [_plate.bottomAnchor constraintEqualToAnchor:self.bottomAnchor],
-                [_plate.leadingAnchor constraintEqualToAnchor:self.leadingAnchor],
-                [_plate.trailingAnchor constraintEqualToAnchor:self.trailingAnchor],
-            ]];
-            // 深色 scrim:玻璃之上内容之下,保白字对比(v2.4.5 教训);浓度随卡片透明度系数
-            UIView *scrim = [[UIView alloc] init];
-            scrim.translatesAutoresizingMaskIntoConstraints = NO;
-            double ca = ([SparksConfig shared].cardAlpha >= 0.4) ? [SparksConfig shared].cardAlpha : 1.0;
-            scrim.backgroundColor = [UIColor colorWithWhite:0 alpha:0.20 * ca];
-            scrim.userInteractionEnabled = NO;
-            [_glass.contentView addSubview:scrim];
-            [_glass.contentView sendSubviewToBack:scrim];
-            [NSLayoutConstraint activateConstraints:@[
-                [scrim.topAnchor constraintEqualToAnchor:_glass.contentView.topAnchor],
-                [scrim.bottomAnchor constraintEqualToAnchor:_glass.contentView.bottomAnchor],
-                [scrim.leadingAnchor constraintEqualToAnchor:_glass.contentView.leadingAnchor],
-                [scrim.trailingAnchor constraintEqualToAnchor:_glass.contentView.trailingAnchor],
-            ]];
         }
 
-        if (title.length && SpSkinFlat()) {
-            // 1/2/3 风格:标题搬到卡外做段头(清单=浅色分组列表,控制台/卡片流=深色分组)
+        if (title.length) {
+            // 标题搬到卡外做段头
             UILabel *sec = [[UILabel alloc] init];
             sec.text = title;
             sec.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
@@ -519,7 +468,7 @@ static UIColor *SpArtTextColor(void) {
             titleWrap.userInteractionEnabled = NO;
             UILabel *titleLabel = [[UILabel alloc] init];
             titleLabel.text = title;
-            CGFloat titleSz = SpSkinList() ? 12 : 13;
+            CGFloat titleSz = 13;
             titleLabel.font = [UIFont systemFontOfSize:titleSz weight:UIFontWeightSemibold];
             titleLabel.textColor = SpArtTitleColor();
             titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
@@ -847,11 +796,7 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
     self.translatesAutoresizingMaskIntoConstraints = NO;
 
     CGFloat leadPad = 58;
-    if (SpSkinList()) {
-        leadPad = 16;   // 清单风格:没有左侧图标方块,行首直接贴标题
-    } else {
-        spAddRowTile(self, title);
-    }
+    spAddRowTile(self, title);
 
     UIStackView *left = [[UIStackView alloc] init];
     left.axis = UILayoutConstraintAxisVertical;
@@ -866,7 +811,7 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
     if (value.length) [left addArrangedSubview:SpMakeSubLabel(value)];
     [left.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:leadPad].active = YES;
     [left.centerYAnchor constraintEqualToAnchor:self.centerYAnchor].active = YES;
-    [self.heightAnchor constraintEqualToConstant:SpSkinList() ? 48 : (value.length ? 58 : 52)].active = YES;
+    [self.heightAnchor constraintEqualToConstant:value.length ? 58 : 52].active = YES;
 }
 
 + (instancetype)infoWithTitle:(NSString *)title value:(NSString *)value {
@@ -1025,53 +970,20 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
     self = [super initWithFrame:CGRectMake(0, 0, 320, 50)];
     if (self) {
         self.translatesAutoresizingMaskIntoConstraints = NO;
-        // 底条:v2.19 起四种风格各一套;玻璃风格保持原样
+        // v2.22.0:只剩控制台一套 dock(近黑实底 + 主题色胶囊 + 文字标签)
         self.backgroundColor = [UIColor clearColor];
-        _usePill = (SpUIStyle() == 0 || SpSkinConsole());
-        _showLabels = SpSkinFlat();
-        CGFloat barR = SpSkinList() ? 12 : (SpSkinFlat() ? 20 : 18);
-        if (SpSkinFlat()) {
-            UIView *bar = [[UIView alloc] init];
-            bar.translatesAutoresizingMaskIntoConstraints = NO;
-            bar.userInteractionEnabled = NO;
-            bar.layer.cornerRadius = barR;
-            bar.layer.cornerCurve = kCACornerCurveContinuous;
-            if (SpSkinList()) {
-                bar.backgroundColor = [UIColor colorWithWhite:0.985 alpha:1.0];
-                bar.layer.borderWidth = 0.5;
-                bar.layer.borderColor = [UIColor colorWithWhite:0 alpha:0.10].CGColor;
-            } else if (SpSkinConsole()) {
-                bar.backgroundColor = [UIColor colorWithWhite:0.09 alpha:0.94];
-                bar.layer.borderWidth = 1;
-                bar.layer.borderColor = SpCardStroke().CGColor;
-            } else {
-                // 目标卡片流:bar 几乎透明,强调"无壳"
-                bar.backgroundColor = [UIColor colorWithWhite:0.06 alpha:0.55];
-            }
-            _barWrap = bar;
-            [self addSubview:bar];
-        } else {
-            UIVisualEffectView *barGlass = SpMakeGlassView();
-            _barWrap = SpGlassWrap(barGlass, 18);   // 圆角与卡片(18)统一
-            _barWrap.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.16].CGColor;
-            _barWrap.layer.borderWidth = 1;
-            _barWrap.userInteractionEnabled = NO;
-            [self addSubview:_barWrap];
-            // v2.14:与卡片同款 scrim+浓度系数,修"top栏和卡片颜色不一致"
-            UIView *barScrim = [[UIView alloc] init];
-            barScrim.translatesAutoresizingMaskIntoConstraints = NO;
-            double bca = ([SparksConfig shared].cardAlpha >= 0.4) ? [SparksConfig shared].cardAlpha : 1.0;
-            barScrim.backgroundColor = [UIColor colorWithWhite:0 alpha:0.20 * bca];
-            barScrim.userInteractionEnabled = NO;
-            [barGlass.contentView addSubview:barScrim];
-            [barGlass.contentView sendSubviewToBack:barScrim];
-            [NSLayoutConstraint activateConstraints:@[
-                [barScrim.topAnchor constraintEqualToAnchor:barGlass.contentView.topAnchor],
-                [barScrim.bottomAnchor constraintEqualToAnchor:barGlass.contentView.bottomAnchor],
-                [barScrim.leadingAnchor constraintEqualToAnchor:barGlass.contentView.leadingAnchor],
-                [barScrim.trailingAnchor constraintEqualToAnchor:barGlass.contentView.trailingAnchor],
-            ]];
-        }
+        _usePill = YES;
+        _showLabels = YES;
+        UIView *bar = [[UIView alloc] init];
+        bar.translatesAutoresizingMaskIntoConstraints = NO;
+        bar.userInteractionEnabled = NO;
+        bar.layer.cornerRadius = 20;
+        bar.layer.cornerCurve = kCACornerCurveContinuous;
+        bar.backgroundColor = [UIColor colorWithWhite:0.09 alpha:0.94];
+        bar.layer.borderWidth = 1;
+        bar.layer.borderColor = SpCardStroke().CGColor;
+        _barWrap = bar;
+        [self addSubview:bar];
         [NSLayoutConstraint activateConstraints:@[
             [_barWrap.topAnchor constraintEqualToAnchor:self.topAnchor],
             [_barWrap.bottomAnchor constraintEqualToAnchor:self.bottomAnchor],
@@ -1096,17 +1008,7 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
             UIView *wrap = [[UIView alloc] init];
             wrap.layer.cornerRadius = 16;
             wrap.layer.cornerCurve = kCACornerCurveContinuous;
-            if (SpSkinConsole()) {
-                wrap.backgroundColor = [SpAccent() colorWithAlphaComponent:0.18];
-            } else {
-                wrap.backgroundColor = [UIColor colorWithWhite:1 alpha:0.92];
-                wrap.layer.shadowColor = [UIColor blackColor].CGColor;
-                wrap.layer.shadowOpacity = 0.18;
-                wrap.layer.shadowRadius = 4;
-                wrap.layer.shadowOffset = CGSizeMake(0, 2);
-                wrap.layer.shadowPath = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(0, 0, 52, 34)
-                                                                   cornerRadius:16].CGPath;
-            }
+            wrap.backgroundColor = [SpAccent() colorWithAlphaComponent:0.18];
             wrap.hidden = YES;
             wrap.userInteractionEnabled = NO;
             wrap.translatesAutoresizingMaskIntoConstraints = NO;
@@ -1136,7 +1038,7 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
                 lb = [[UILabel alloc] init];
                 lb.text = titles[i];
                 lb.font = [UIFont systemFontOfSize:9 weight:UIFontWeightMedium];
-                lb.textColor = SpSkinList() ? [UIColor colorWithWhite:0.45 alpha:1] : SpW(0.55);
+                lb.textColor = SpW(0.55);
                 lb.textAlignment = NSTextAlignmentCenter;
                 lb.userInteractionEnabled = NO;
                 lb.translatesAutoresizingMaskIntoConstraints = NO;
@@ -1146,25 +1048,11 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
             }
             [labelsA addObject:lb ?: (UILabel *)[NSNull null]];
 
-            // 底部小圆点:只有玻璃风格用(其余风格靠文字/配色区分)
-            UIView *dot = [[UIView alloc] init];
-            dot.backgroundColor = [UIColor clearColor];
-            dot.layer.cornerRadius = 2;
-            dot.translatesAutoresizingMaskIntoConstraints = NO;
-            dot.userInteractionEnabled = NO;
-            if (SpUIStyle() == 0) {
-                [t addSubview:dot];
-                [dot.centerXAnchor constraintEqualToAnchor:t.centerXAnchor].active = YES;
-                [dot.topAnchor constraintEqualToAnchor:t.bottomAnchor constant:-5].active = YES;
-                [dot.widthAnchor constraintEqualToConstant:4].active = YES;
-                [dot.heightAnchor constraintEqualToConstant:4].active = YES;
-            }
 
             [t addTarget:self action:@selector(spTabTapped:) forControlEvents:UIControlEventTouchUpInside];
             [self addSubview:t];
             [tabs addObject:t];
             [iconsA addObject:ic];
-            [dotsA addObject:dot];
         }
         _tabs = tabs;
         _icons = iconsA;
@@ -1187,7 +1075,7 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
 - (void)setIndex:(NSInteger)i animated:(BOOL)animated {
     _index = i;
     void (^apply)(void) = ^{
-        UIColor *idle = SpSkinList() ? [UIColor colorWithWhite:0.45 alpha:1] : SpW(0.55);
+        UIColor *idle = SpW(0.55);
         for (NSUInteger k = 0; k < self->_tabs.count; k++) {
             BOOL on = ((NSInteger)k == self->_index);
             UIView *wrap = objc_getAssociatedObject(self->_tabs[k], "wrap");
@@ -1246,8 +1134,6 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
 @property (nonatomic, strong) UIView *panelRoot;
 @property (nonatomic, strong) UIView *backgroundTapView;
 @property (nonatomic, strong) UIView *donateView;
-@property (nonatomic, assign) NSInteger feedFilter;    // 卡片流筛选:0 全部 1 待发 2 已发
-@property (nonatomic, assign) BOOL feedManaging;          // 卡片流风格下是否展开原有目标管理卡
 @property (nonatomic, copy) NSString *detailKey;      // 目标单独设置页:正在查看的目标 key(空=列表)
 @end
 
@@ -1318,7 +1204,6 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
 - (void)spBuildConsoleButton;
 - (void)spBuildConsoleOps;
 - (UIStackView *)spConsoleRow:(NSArray<UIView *> *)tiles;
-- (void)spFeedFabTapped;
 - (void)applyAvatarInto:(UIView *)avatar;
 - (void)applyPanelBackground;
 - (void)segChangedTo:(NSInteger)idx;
@@ -1898,10 +1783,6 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
     UIView *root = [[UIView alloc] initWithFrame:CGRectMake((screen.size.width - pw) / 2,
                                                             (screen.size.height - ph) / 2, pw, ph)];
     root.backgroundColor = [UIColor clearColor];   // v2.13.2 用户点名取消淡底:卡片直浮于视频上
-    if (SpSkinList()) {
-        // 极简清单:面板本身给一层浅灰底,白卡才有"分组列表"的落点
-        root.backgroundColor = [UIColor colorWithWhite:0.96 alpha:0.98];
-    }
     // 根容器统一圆角+裁切:内容卡片(边距 14pt<32pt 圆角)在底衬圆角外穿直角的根因修复
     root.layer.cornerRadius = 32;
     root.layer.cornerCurve = kCACornerCurveContinuous;
@@ -2002,22 +1883,18 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
     [nameL.trailingAnchor constraintLessThanOrEqualToAnchor:close.leadingAnchor constant:-8].active = YES;
 
     // v2.19.5:头部也是"所有 tab 共用"的,必须一起换 —— 新风格收起头像块,改标题式头部
-    if (SpSkinFlat()) {
+    {
         avatar.hidden = YES;
         nameL.hidden = YES;
         UILabel *t = [[UILabel alloc] init];
         t.text = @"续火花";
-        t.font = [UIFont systemFontOfSize:SpSkinList() ? 17 : 20 weight:UIFontWeightBold];
+        t.font = [UIFont systemFontOfSize:20 weight:UIFontWeightBold];
         t.textColor = SpArtTextColor();
-        t.textAlignment = SpSkinList() ? NSTextAlignmentCenter : NSTextAlignmentLeft;
+        t.textAlignment = NSTextAlignmentLeft;
         t.translatesAutoresizingMaskIntoConstraints = NO;
         [surface addSubview:t];
         [t.centerYAnchor constraintEqualToAnchor:surface.centerYAnchor].active = YES;
-        if (SpSkinList()) {
-            [t.centerXAnchor constraintEqualToAnchor:surface.centerXAnchor].active = YES;
-        } else {
-            [t.leadingAnchor constraintEqualToAnchor:surface.leadingAnchor constant:16].active = YES;
-        }
+        [t.leadingAnchor constraintEqualToAnchor:surface.leadingAnchor constant:16].active = YES;
     }
 
     // 授权专属 ID 徽标已随授权校验一并移除(v2.18.1)
@@ -2056,7 +1933,7 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
     seg.translatesAutoresizingMaskIntoConstraints = NO;
     [root addSubview:seg];
     // v2.19.2:dock 位置随风格走 —— 玻璃风格在头部下方(原样),三种新风格挪到面板底部
-    BOOL dockBottom = SpSkinFlat();
+    BOOL dockBottom = YES;   // v2.22.0:dock 固定在面板底部
     if (dockBottom) {
         [seg.bottomAnchor constraintEqualToAnchor:root.bottomAnchor constant:-14].active = YES;
     } else {
@@ -2071,8 +1948,7 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
     scroll.showsVerticalScrollIndicator = NO;
     scroll.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
     // v2.14:首卡/末卡与面板边缘的间距=卡间距 12,整体节奏一致
-    // 卡片流风格右下有常驻 FAB,底部多留一段,避免最后一张卡被压住
-    scroll.contentInset = UIEdgeInsetsMake(12, 0, SpSkinFeed() ? 84 : 12, 0);
+    scroll.contentInset = UIEdgeInsetsMake(12, 0, 12, 0);
     scroll.translatesAutoresizingMaskIntoConstraints = NO;
     [root addSubview:scroll];
     if (dockBottom) {
@@ -2085,29 +1961,6 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
     }
     [scroll.leadingAnchor constraintEqualToAnchor:root.leadingAnchor constant:14].active = YES;
     [scroll.trailingAnchor constraintEqualToAnchor:root.trailingAnchor constant:-14].active = YES;
-
-    // 卡片流风格的常驻 FAB:浮在 dock 上方右侧
-    if (SpSkinFeed()) {
-        UIButton *fab = [UIButton buttonWithType:UIButtonTypeSystem];
-        [fab setImage:[UIImage systemImageNamed:@"flame.fill"] forState:UIControlStateNormal];
-        fab.tintColor = [UIColor whiteColor];
-        fab.backgroundColor = SpAccent();
-        fab.layer.cornerRadius = 28;
-        fab.layer.cornerCurve = kCACornerCurveContinuous;
-        fab.layer.shadowColor = [UIColor blackColor].CGColor;
-        fab.layer.shadowOpacity = 0.28;
-        fab.layer.shadowRadius = 10;
-        fab.layer.shadowOffset = CGSizeMake(0, 4);
-        fab.translatesAutoresizingMaskIntoConstraints = NO;
-        [fab addTarget:self action:@selector(spFeedFabTapped) forControlEvents:UIControlEventTouchUpInside];
-        [root addSubview:fab];
-        [NSLayoutConstraint activateConstraints:@[
-            [fab.trailingAnchor constraintEqualToAnchor:root.trailingAnchor constant:-20],
-            [fab.bottomAnchor constraintEqualToAnchor:seg.topAnchor constant:-16],
-            [fab.widthAnchor constraintEqualToConstant:56],
-            [fab.heightAnchor constraintEqualToConstant:56],
-        ]];
-    }
 
     UIStackView *stack = [[UIStackView alloc] init];
     stack.axis = UILayoutConstraintAxisVertical;
@@ -2148,11 +2001,10 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
     for (NSDictionary *t in cfg.targets) if ([cfg sentToday:SpTargetKeyOf(t)]) done++;
     // 含 tab:切换页面必须重建(去重只挡同页同状态的重复刷新);
     // 含底衬/背景图:切换后行标签与即时视觉保持一致
-    return [NSString stringWithFormat:@"tab%ld|%lu|%d|%d|%lu|%d|bd%ld|bg%d|us%ld|ff%ld",
+    return [NSString stringWithFormat:@"tab%ld|%lu|%d|%d|%lu|%d|bd%ld|bg%d",
             (long)self.tab, (unsigned long)cfg.targets.count, cfg.master, eng.running,
             (unsigned long)done, cfg.sendTemplate != nil,
-            (long)cfg.panelBackdrop, cfg.panelBgPath.length > 0,
-            (long)cfg.uiStyle, (long)self.feedFilter];
+            (long)cfg.panelBackdrop, cfg.panelBgPath.length > 0];
 }
 
 - (void)scheduleRebuild {
@@ -2364,17 +2216,16 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
 
 #pragma mark - 目标卡片流(v2.19.0)
 
-- (void)spFeedFabTapped {
-    [[SparksConfig shared] save];
-    [[SparksEngine shared] runDailyNow:YES];
-    [self scheduleRebuild];
+#pragma mark - 状态页
+
+- (void)buildStatusTab {
+    [self spBuildConsoleTab];
 }
 
-- (void)spFeedPillTapped:(UIButton *)b {
-    self.feedFilter = b.tag;
-    [self scheduleRebuild];
-}
 
+#pragma mark - 目标页
+
+// 目标卡片:首字母头像 + 昵称 + 群/单聊 + 已发/待发
 - (UIView *)spFeedCardForTarget:(NSDictionary *)t {
     SparksConfig *cfg = [SparksConfig shared];
     NSString *key = SpTargetKeyOf(t);
@@ -2413,7 +2264,7 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
     UILabel *title = [[UILabel alloc] init];
     title.text = name;
     title.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
-    title.textColor = SpArtTextColor();
+    title.textColor = [UIColor whiteColor];
     title.translatesAutoresizingMaskIntoConstraints = NO;
     [s addSubview:title];
 
@@ -2458,154 +2309,6 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
     return card;
 }
 
-#pragma mark - 状态页
-
-- (void)buildStatusTab {
-    SparksConfig *cfg = [SparksConfig shared];
-    SparksEngine *eng = [SparksEngine shared];
-    __weak typeof(self) ws = self;
-
-    // 控制台风格:状态页整体重排(环形头部 → 指标砖 → 主按钮 → 紧凑操作行),不再走下面这套卡片
-    if (SpSkinConsole()) {
-        [self spBuildConsoleTab];
-        return;
-    }
-
-    // 进度卡
-    SparksGlassCard *hero = [[SparksGlassCard alloc] initWithCardTitle:nil];
-    UIView *surface = hero.surface;
-
-    UIImageView *flame = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"flame.fill"]];
-    flame.tintColor = SpAccent();
-    flame.contentMode = UIViewContentModeScaleAspectFit;
-    flame.translatesAutoresizingMaskIntoConstraints = NO;
-    [surface addSubview:flame];
-    [flame.leadingAnchor constraintEqualToAnchor:surface.leadingAnchor constant:16].active = YES;
-    [flame.topAnchor constraintEqualToAnchor:surface.topAnchor constant:16].active = YES;
-    [flame.widthAnchor constraintEqualToConstant:22].active = YES;
-    [flame.heightAnchor constraintEqualToConstant:22].active = YES;
-
-    UILabel *hTitle = SpMakeTitleLabel(@"今日续火花", 13);
-    [surface addSubview:hTitle];
-    [hTitle.leadingAnchor constraintEqualToAnchor:flame.trailingAnchor constant:8].active = YES;
-    [hTitle.topAnchor constraintEqualToAnchor:surface.topAnchor constant:14].active = YES;
-
-    NSUInteger done = 0;
-    for (NSDictionary *t in cfg.targets) if ([cfg sentToday:SpTargetKeyOf(t)]) done++;
-    NSString *stateText = eng.running ? @"执行中…" : (cfg.master ? @"待命" : @"已停用");
-    UILabel *hSub = SpMakeSubLabel([NSString stringWithFormat:@"今日 %@ · %@", SpFormatHM(cfg.todayEffectiveTime ?: cfg.dailyTime), stateText]);
-    [surface addSubview:hSub];
-    [hSub.leadingAnchor constraintEqualToAnchor:hTitle.leadingAnchor].active = YES;
-    [hSub.topAnchor constraintEqualToAnchor:hTitle.bottomAnchor constant:2].active = YES;
-
-    UILabel *count = [[UILabel alloc] init];
-    count.text = [NSString stringWithFormat:@"%lu/%lu", (unsigned long)done, (unsigned long)cfg.targets.count];
-    count.font = SpRounded(26, 0.8);
-    count.textColor = (done >= cfg.targets.count && cfg.targets.count > 0) ? [UIColor systemGreenColor] : [UIColor whiteColor];
-    count.translatesAutoresizingMaskIntoConstraints = NO;
-    [surface addSubview:count];
-    [count.trailingAnchor constraintEqualToAnchor:surface.trailingAnchor constant:-16].active = YES;
-    [count.centerYAnchor constraintEqualToAnchor:flame.centerYAnchor].active = YES;
-
-    UIView *track = [[UIView alloc] init];
-    track.backgroundColor = [UIColor colorWithWhite:1 alpha:0.22];
-    track.layer.cornerRadius = 3;
-    track.translatesAutoresizingMaskIntoConstraints = NO;
-    [surface addSubview:track];
-    [track.leadingAnchor constraintEqualToAnchor:surface.leadingAnchor constant:16].active = YES;
-    [track.trailingAnchor constraintEqualToAnchor:surface.trailingAnchor constant:-16].active = YES;
-    [track.topAnchor constraintEqualToAnchor:hSub.bottomAnchor constant:12].active = YES;
-    [track.heightAnchor constraintEqualToConstant:6].active = YES;
-
-    UIView *fill = [[UIView alloc] init];
-    fill.backgroundColor = SpAccent();
-    fill.layer.cornerRadius = 3;
-    fill.translatesAutoresizingMaskIntoConstraints = NO;
-    [track addSubview:fill];
-    [fill.leadingAnchor constraintEqualToAnchor:track.leadingAnchor].active = YES;
-    [fill.topAnchor constraintEqualToAnchor:track.topAnchor].active = YES;
-    [fill.bottomAnchor constraintEqualToAnchor:track.bottomAnchor].active = YES;
-    CGFloat frac = cfg.targets.count ? (CGFloat)done / (CGFloat)cfg.targets.count : 0;
-    [fill.widthAnchor constraintEqualToAnchor:track.widthAnchor multiplier:MAX(frac, 0.02)].active = YES;
-    [track.bottomAnchor constraintEqualToAnchor:surface.bottomAnchor constant:-14].active = YES;
-
-    [self.stack addArrangedSubview:hero];
-
-    // 运行卡
-    SparksGlassCard *switchCard = [[SparksGlassCard alloc] initWithCardTitle:@"运行"];
-    BOOL textOk = cfg.sendTemplate != nil;
-    [switchCard addRow:[SparksStatusRow rowWithTitle:@"校准状态"
-                                                value:textOk ? @"已捕获发送模板" : @"未校准 · 先在聊天页手动发一条消息"
-                                                 icon:(textOk ? @"checkmark.circle.fill" : @"exclamationmark.triangle.fill")
-                                                color:(textOk ? [UIColor systemGreenColor] : [UIColor systemOrangeColor])]];
-    [switchCard addRow:SpRowSeparator()];
-    [switchCard addRow:[SparksInfoRow switchWithTitle:@"总开关" on:cfg.master onChange:^(BOOL on) {
-        SparksConfig *c = [SparksConfig shared];
-        c.master = on;
-        [c save];
-        SparksLog(@"总开关:%@", on ? @"开" : @"关");
-        typeof(self) s = ws;
-        if (s) dispatch_async(dispatch_get_main_queue(), ^{ [s scheduleRebuild]; });
-    }]];
-    [switchCard addRow:SpRowSeparator()];
-    [switchCard addRow:[SparksStatusRow rowWithTitle:@"媒体校准"
-                                                value:[NSString stringWithFormat:@"图片%@ · 语音%@",
-                                                       cfg.mediaTpl ? @"已校准" : @"未校准",
-                                                       cfg.audioTpl ? @"已校准" : @"未校准"]
-                                                 icon:((cfg.mediaTpl && cfg.audioTpl) ? @"checkmark.circle.fill"
-                                                          : ((cfg.mediaTpl || cfg.audioTpl) ? @"exclamationmark.triangle.fill" : @"minus.circle"))
-                                                color:((cfg.mediaTpl && cfg.audioTpl) ? [UIColor systemGreenColor]
-                                                          : ((cfg.mediaTpl || cfg.audioTpl) ? [UIColor systemOrangeColor] : [UIColor systemGrayColor]))]];
-    [switchCard addRow:SpRowSeparator()];
-    [switchCard addRow:[SparksInfoRow infoWithTitle:@"后台"
-                                              value:[NSString stringWithFormat:@"保活%@ · 后台发送%@",
-                                                     cfg.keepAlive ? @"开" : @"关",
-                                                     cfg.backgroundSend ? @"开" : @"关"]]];
-    [self.stack addArrangedSubview:switchCard];
-
-    // 操作卡
-    SparksGlassCard *actions = [[SparksGlassCard alloc] initWithCardTitle:nil];
-    UIStackView *btnRow = [[UIStackView alloc] init];
-    btnRow.axis = UILayoutConstraintAxisHorizontal;
-    btnRow.spacing = 10;
-    btnRow.distribution = UIStackViewDistributionFillEqually;
-    btnRow.translatesAutoresizingMaskIntoConstraints = NO;
-    [actions.surface addSubview:btnRow];
-    [btnRow.topAnchor constraintEqualToAnchor:actions.surface.topAnchor constant:12].active = YES;
-    [btnRow.leadingAnchor constraintEqualToAnchor:actions.surface.leadingAnchor constant:16].active = YES;
-    [btnRow.trailingAnchor constraintEqualToAnchor:actions.surface.trailingAnchor constant:-16].active = YES;
-    [btnRow.bottomAnchor constraintEqualToAnchor:actions.surface.bottomAnchor constant:-12].active = YES;
-
-    SparksCapsuleButton *go = [[SparksCapsuleButton alloc] initWithTitle:@"立即续火花" icon:@"flame.fill" primary:YES];
-    go.onTap = ^{
-        typeof(self) s = ws;
-        if (!s) return;
-        [[SparksConfig shared] save];
-        [[SparksEngine shared] runDailyNow:NO];
-        dispatch_async(dispatch_get_main_queue(), ^{ [s scheduleRebuild]; });
-    };
-    [btnRow addArrangedSubview:go];
-
-    SparksCapsuleButton *test = [[SparksCapsuleButton alloc] initWithTitle:@"测试 AI 接入" icon:@"wand.and.stars" primary:NO];
-    test.onTap = ^{
-        typeof(self) s = ws;
-        if (!s) return;
-        [SparksAI testGenerateWithCompletion:^(NSString *text, NSString *error) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                typeof(self) s2 = ws;
-                if (!s2) return;
-                [s2 showToast:text ? [NSString stringWithFormat:@"✅ 接入成功:%@", text] : [NSString stringWithFormat:@"❌ 接入失败:%@", error ?: @"看日志"]];
-                SparksLog(@"AI 接入测试:%@", text ? [NSString stringWithFormat:@"成功「%@」", text] : (error ?: @"失败"));
-            });
-        }];
-    };
-    [btnRow addArrangedSubview:test];
-
-    [self.stack addArrangedSubview:actions];
-}
-
-#pragma mark - 目标页
-
 - (void)buildTargetsTab {
     SparksConfig *cfg = [SparksConfig shared];
 
@@ -2615,77 +2318,13 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
         return;
     }
 
-    // 控制台 / 目标卡片流:目标页都换成卡片流(控制台不带筛选胶囊)
-    if ((SpSkinFeed() || SpSkinConsole()) && cfg.targets.count) {
-        NSUInteger pending = 0;
-        for (NSDictionary *t in cfg.targets) if (![cfg sentToday:SpTargetKeyOf(t)]) pending++;
-        NSUInteger total = cfg.targets.count;
-        NSArray<NSString *> *names = @[
-            [NSString stringWithFormat:@"全部 %lu", (unsigned long)total],
-            [NSString stringWithFormat:@"待发 %lu", (unsigned long)pending],
-            [NSString stringWithFormat:@"已发 %lu", (unsigned long)(total - pending)]];
-
-        UIStackView *pills = [[UIStackView alloc] init];
-        pills.axis = UILayoutConstraintAxisHorizontal;
-        pills.spacing = 8;
-        pills.translatesAutoresizingMaskIntoConstraints = NO;
-        for (NSInteger i = 0; SpSkinFeed() && i < 3; i++) {
-            BOOL on = (self.feedFilter == i);
-            UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
-            [b setTitle:names[(NSUInteger)i] forState:UIControlStateNormal];
-            b.titleLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
-            [b setTitleColor:(on ? [UIColor blackColor] : SpW(0.72)) forState:UIControlStateNormal];
-            b.backgroundColor = on ? SpAccent() : [UIColor colorWithWhite:1 alpha:0.10];
-            b.layer.cornerRadius = 14;
-            b.layer.cornerCurve = kCACornerCurveContinuous;
-            b.tag = i;
-            b.contentEdgeInsets = UIEdgeInsetsMake(6, 14, 6, 14);
-            [b addTarget:self action:@selector(spFeedPillTapped:) forControlEvents:UIControlEventTouchUpInside];
-            [pills addArrangedSubview:b];
+    // 目标页:每人一张卡 + 「管理目标」入口(v2.22.0 只有这一套)
+    if (cfg.targets.count) {
+        for (NSDictionary *t in [cfg.targets copy]) {
+            UIView *feedCard = [self spFeedCardForTarget:t];
+            if (feedCard) [self.stack addArrangedSubview:feedCard];
         }
-        UIView *pillWrap = [[UIView alloc] init];
-        pillWrap.translatesAutoresizingMaskIntoConstraints = NO;
-        [pillWrap addSubview:pills];
-        [NSLayoutConstraint activateConstraints:@[
-            [pills.leadingAnchor constraintEqualToAnchor:pillWrap.leadingAnchor],
-            [pills.topAnchor constraintEqualToAnchor:pillWrap.topAnchor],
-            [pills.bottomAnchor constraintEqualToAnchor:pillWrap.bottomAnchor],
-            [pills.trailingAnchor constraintLessThanOrEqualToAnchor:pillWrap.trailingAnchor],
-        ]];
-        if (SpSkinFeed()) [self.stack addArrangedSubview:pillWrap];
-
-        if (!self.feedManaging) {
-            for (NSDictionary *t in [cfg.targets copy]) {
-                BOOL sent = [cfg sentToday:SpTargetKeyOf(t)];
-                if (self.feedFilter == 1 && sent) continue;
-                if (self.feedFilter == 2 && !sent) continue;
-                UIView *feedCard = [self spFeedCardForTarget:t];
-                if (feedCard) [self.stack addArrangedSubview:feedCard];
-            }
-            // 卡片流接管本页:原有"目标管理"整卡折叠到这一个入口后面
-            SparksGlassCard *manage = [[SparksGlassCard alloc] initWithCardTitle:nil];
-            __weak typeof(self) wsm = self;
-            [manage addRow:[SparksInfoRow actionWithTitle:@"管理目标"
-                                                   value:[NSString stringWithFormat:@"%lu 个 ›", (unsigned long)cfg.targets.count]
-                                                   onTap:^{
-                typeof(self) s = wsm;
-                if (!s) return;
-                s.feedManaging = YES;
-                [s scheduleRebuild];
-            }]];
-            [self.stack addArrangedSubview:manage];
-            return;
-        }
-        // 管理模式:给一条回到卡片流的入口,下面继续走原有管理卡片
-        SparksGlassCard *back = [[SparksGlassCard alloc] initWithCardTitle:nil];
-        __weak typeof(self) wsb = self;
-        [back addRow:[SparksInfoRow actionWithTitle:@"← 返回卡片流" value:@"" onTap:^{
-            typeof(self) s = wsb;
-            if (!s) return;
-            s.feedManaging = NO;
-            [s scheduleRebuild];
-        }]];
-        [self.stack addArrangedSubview:back];
+        return;
     }
 
     SparksGlassCard *card = [[SparksGlassCard alloc]
@@ -3080,25 +2719,6 @@ static NSString *SpVoiceName(NSString *code) {
     SparksConfig *cfg = [SparksConfig shared];
     __weak typeof(self) ws = self;
     CGRect screen = [UIScreen mainScreen].bounds;
-
-    // 界面风格(v2.19.0):四种皮共用同一套业务逻辑,只换外壳
-    SparksGlassCard *styleCard = [[SparksGlassCard alloc] initWithCardTitle:@"界面风格"];
-    NSArray<NSString *> *styles = @[@"玻璃 · 现状", @"控制台", @"目标卡片流", @"极简清单"];
-    for (NSInteger i = 0; i < (NSInteger)styles.count; i++) {
-        [styleCard addRow:[SparksInfoRow actionWithTitle:styles[(NSUInteger)i]
-                                                   value:(SpUIStyle() == i) ? @"✓ 使用中" : @""
-                                                   onTap:^{
-            typeof(self) s = ws;
-            if (!s) return;
-            SparksConfig *c = [SparksConfig shared];
-            c.uiStyle = i;
-            [c save];
-            SparksLog(@"界面风格切换:%@", styles[(NSUInteger)i]);
-            [s refreshChrome];
-        }]];
-        if (i < (NSInteger)styles.count - 1) [styleCard addRow:SpRowSeparator()];
-    }
-    [self.stack addArrangedSubview:styleCard];
 
     // 材质卡(作用于面板底衬玻璃:卡片在设置风格下恒为实色)
     SparksGlassCard *material = [[SparksGlassCard alloc] initWithCardTitle:@"材质(面板底)"];

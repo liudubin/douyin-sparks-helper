@@ -8,7 +8,6 @@
 static NSString *const kMaster    = @"sparks.master";
 static NSString *const kDailyTime = @"sparks.time";
 static NSString *const kInterval  = @"sparks.interval";
-static NSString *const kUIStyle   = @"sparks.uistyle";
 static NSString *const kNoJump    = @"sparks.nojump";
 static NSString *const kAiURL     = @"sparks.ai.url";
 static NSString *const kAiKey     = @"sparks.ai.key";
@@ -157,7 +156,6 @@ BOOL SparksURLOK(NSURL *url) {
     [self recomputeTodayEffectiveTime];
     double itv = [d doubleForKey:kInterval];
     _interval  = itv > 0 ? itv : 0.1;   // 默认 0.1s(密集续火花);常规值仍可填 15~3600
-    _uiStyle   = [d integerForKey:kUIStyle];   // 0 玻璃(默认)/1 控制台/2 目标卡片流/3 极简清单
     // 默认开启:用户要的是"后台自动发",宁可退到语音/图片也不要跳聊天页
     _noJump    = [d objectForKey:kNoJump] ? [d boolForKey:kNoJump] : YES;
     _aiURL   = [d stringForKey:kAiURL] ?: @"https://open.bigmodel.cn/api/paas/v4/chat/completions";
@@ -350,7 +348,6 @@ static BOOL SpSandboxHasConfig(NSUserDefaults *d) {
     [d setDouble:_ballSize forKey:kBallSize];
     if (_ballIconPath.length) [d setObject:_ballIconPath forKey:kBallIcon]; else [d removeObjectForKey:kBallIcon];
     [d setInteger:_materialMode forKey:kMaterial];
-    [d setInteger:_uiStyle forKey:kUIStyle];
     [d setBool:_noJump forKey:kNoJump];
     [d setObject:_accentHex forKey:kAccent];
     [d setBool:_fontFollowsAccent forKey:kFontAcc];
