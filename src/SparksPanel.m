@@ -681,12 +681,16 @@ static UIColor *SpArtTextColor(void)  { return [UIColor whiteColor]; }
             self.collapseWidth.active = YES;
         }
 
+        // 关键:continuous 曲线在"半径 = 边长/2"时是超椭圆(iOS 大圆角),看着仍是方块;
+        // 正圆必须用 circular 曲线。
+        self->_btPlate.layer.cornerCurve = kCACornerCurveCircular;
+        CGFloat targetRadius = self.bounds.size.height > 0 ? self.bounds.size.height / 2.0 : 24;
         CABasicAnimation *round = [CABasicAnimation animationWithKeyPath:@"cornerRadius"];
         round.fromValue = @(self->_btPlate.layer.cornerRadius);
-        round.toValue = @24;
+        round.toValue = @(targetRadius);
         round.duration = 0.28;
         round.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut];
-        self->_btPlate.layer.cornerRadius = 24;
+        self->_btPlate.layer.cornerRadius = targetRadius;
         [self->_btPlate.layer addAnimation:round forKey:@"spRound"];
 
         [UIView animateWithDuration:0.28 delay:0
@@ -695,6 +699,10 @@ static UIColor *SpArtTextColor(void)  { return [UIColor whiteColor]; }
                          animations:^{ [self.superview layoutIfNeeded]; }
                          completion:^(BOOL done) {
             if (!self->_btLoading) return;
+            // 布局落定后再校一次半径,避免初始 bounds 还没更新导致圆角偏小
+            CGFloat half = self.bounds.size.height / 2.0;
+            self->_btPlate.layer.cornerRadius = half;
+            self.layer.cornerRadius = half;
             [self spShowRing];   // ③ 中心出现旋转圆环
         }];
     }];
@@ -739,7 +747,9 @@ static UIColor *SpArtTextColor(void)  { return [UIColor whiteColor]; }
         self.collapseWidth.active = NO;
         self.stretchWidth.active = YES;
     }
+    _btPlate.layer.cornerCurve = kCACornerCurveContinuous;
     _btPlate.layer.cornerRadius = 14;
+    self.layer.cornerRadius = 24;
     [UIView animateWithDuration:0.22 animations:^{
         self->_btInner.alpha = 1;
         self->_btInner.transform = CGAffineTransformIdentity;
