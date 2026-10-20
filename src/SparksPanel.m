@@ -516,7 +516,8 @@ static UIColor *SpArtTextColor(void)  { return [UIColor whiteColor]; }
 @interface SparksCapsuleButton : UIControl
 - (instancetype)initWithTitle:(NSString *)title icon:(NSString *)sysImageName primary:(BOOL)primary;
 @property (nonatomic, copy) void (^onTap)(void);
-/// 容器注入的宽度约束 —— 三段动画第二步靠它把按钮宽度收成圆
+/// 容器注入:满宽约束(常态)与 48×48 方约束(收缩态),切换 active 实现收纳
+@property (nonatomic, strong) NSLayoutConstraint *stretchWidth;
 @property (nonatomic, strong) NSLayoutConstraint *collapseWidth;
 /// 三段变化:文字淡出 → 宽度收纳成圆形 → 中心出现旋转圆环
 - (void)startLoading;
@@ -642,9 +643,12 @@ static UIColor *SpArtTextColor(void)  { return [UIColor whiteColor]; }
         self->_btInner.transform = CGAffineTransformMakeScale(0.86, 0.86);
     } completion:^(BOOL finished) {
         if (!self->_btLoading) return;
-        // ② 宽度收纳成圆形(高度 48 → 宽度也收到 48)
-        self->_btRestWidth = self.collapseWidth ? self.collapseWidth.constant : self.bounds.size.width;
-        if (self.collapseWidth) self.collapseWidth.constant = 48;
+        // ② 宽度收纳成圆形:关掉满宽约束、打开 48 宽约束
+        //(v2.23.2 修正:之前把 constant 当宽度写,等于"父宽 + 48",按钮反而变宽,动画等于没发生)
+        if (self.collapseWidth) {
+            self.stretchWidth.active = NO;
+            self.collapseWidth.active = YES;
+        }
 
         CABasicAnimation *round = [CABasicAnimation animationWithKeyPath:@"cornerRadius"];
         round.fromValue = @(self->_btPlate.layer.cornerRadius);
@@ -700,7 +704,10 @@ static UIColor *SpArtTextColor(void)  { return [UIColor whiteColor]; }
     _btLoading = NO;
     [_btRing removeAnimationForKey:@"spSpin"];
     _btRing.opacity = 0;
-    if (self.collapseWidth) self.collapseWidth.constant = _btRestWidth;
+    if (self.collapseWidth) {
+        self.collapseWidth.active = NO;
+        self.stretchWidth.active = YES;
+    }
     _btPlate.layer.cornerRadius = 14;
     [UIView animateWithDuration:0.22 animations:^{
         self->_btInner.alpha = 1;
@@ -1229,6 +1236,7 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
 @property (nonatomic, strong) UIView *panelRoot;
 @property (nonatomic, strong) UIView *backgroundTapView;
 @property (nonatomic, strong) UIView *donateView;
+@property (nonatomic, weak) SparksCapsuleButton *busyButton;   // 正在播放三段动画的按钮:期间冻结内容重建
 @property (nonatomic, assign) BOOL targetsManaging;   // 目标页:是否切到"管理"(删除/单独设置)模式
 @property (nonatomic, copy) NSString *detailKey;      // 目标单独设置页:正在查看的目标 key(空=列表)
 @end
@@ -2105,6 +2113,7 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
 
 - (void)scheduleRebuild {
     if (!self.panelRoot.superview) return;
+    if (self.busyButton) return;   // 按钮动画播放中,别把按钮重建掉
     self.lastSig = nil;   // 用户操作一律强制重建:行标签/输入框即时刷新,不被签名去重吞掉
     [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(rebuildContent) object:nil];
     [self performSelector:@selector(rebuildContent) withObject:nil afterDelay:0.25];
@@ -2113,6 +2122,7 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
 // 引擎状态回调专用:签名未变不重建(发热优化,去重只留给非用户路径)
 - (void)scheduleRebuildIfChanged {
     if (!self.panelRoot.superview) return;
+    if (self.busyButton) return;   // 同上
     [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(rebuildContent) object:nil];
     [self performSelector:@selector(rebuildContent) withObject:nil afterDelay:0.25];
 }
@@ -2270,24 +2280,32 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
     UIView *wrap = [[UIView alloc] init];
     wrap.translatesAutoresizingMaskIntoConstraints = NO;
     [wrap addSubview:go];
-    NSLayoutConstraint *widthC = [go.widthAnchor constraintEqualToAnchor:wrap.widthAnchor];
-    go.collapseWidth = widthC;
+    NSLayoutConstraint *stretchC = [go.widthAnchor constraintEqualToAnchor:wrap.widthAnchor];
+    NSLayoutConstraint *squareC = [go.widthAnchor constraintEqualToConstant:48];
+    squareC.active = NO;   // 常态满宽,收缩时才启用
+    go.stretchWidth = stretchC;
+    go.collapseWidth = squareC;
     [NSLayoutConstraint activateConstraints:@[
         [go.topAnchor constraintEqualToAnchor:wrap.topAnchor],
         [go.bottomAnchor constraintEqualToAnchor:wrap.bottomAnchor],
         [go.centerXAnchor constraintEqualToAnchor:wrap.centerXAnchor],
-        widthC,
+        stretchC,
     ]];
     __weak SparksCapsuleButton *weakGo = go;
     go.onTap = ^{
         typeof(self) s2 = ws;
         if (!s2) return;
         [weakGo startLoading];            // ① 文字淡出 ② 收成圆 ③ 旋转圆环
+        s2.busyButton = weakGo;           // 动画期间冻结重建,否则按钮会被立刻重建掉
         [[SparksConfig shared] save];
         [[SparksEngine shared] runDailyNow:YES];
-        // 留够动画时间再重建面板(重建会把这个按钮换回常态)
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.4 * NSEC_PER_SEC)),
-                       dispatch_get_main_queue(), ^{ [s2 scheduleRebuild]; });
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            typeof(self) s3 = ws;
+            if (!s3) return;
+            s3.busyButton = nil;
+            [s3 scheduleRebuild];
+        });
     };
     [self.stack addArrangedSubview:wrap];
 }
