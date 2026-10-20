@@ -1037,12 +1037,14 @@ static NSString *SpDisplayName(NSDictionary *target) {
             });
         };
         // 文本兜底路径
+        // 收尾块在 media / pickMedia 声明之后再赋值(见下方),这里只做前向声明
+        __block void (^sendTextDone)(BOOL);
         void (^sendText)(void) = ^{
             typeof(self) s4 = ws;
             if (!s4) return;
             // ① 已有缓存会话(开过聊天页/消息列表) → 直接投递,页面完全不动
             if ([s4 sendTextWithoutPage:finalText target:target]) {
-                advance();
+                sendTextDone(YES);
                 return;
             }
             // ② 没缓存 → 用 IM 服务按 uid/cid 反查会话(移植自第三方插件),拿到同样免跳页
@@ -1050,22 +1052,19 @@ static NSString *SpDisplayName(NSDictionary *target) {
                 typeof(self) s9 = ws;
                 if (!s9) return;
                 if (ok) {
-                    advance();
+                    sendTextDone(YES);
                     return;
                 }
                 if (s9.config.noJump) {
                     // ③ 只后台模式:绝不打开聊天页,退到语音/图片
                     [s9 sendFallbackMediaForTarget:target text:finalText completion:^(BOOL ok2) {
-                        typeof(self) s10 = ws;
-                        if (!s10) return;
-                        if (!ok2) [s10 noteTargetFailed:target];
-                        advance();
+                        sendTextDone(ok2);
                     }];
                     return;
                 }
+                // ④ 用户显式关掉"只后台发送"才走聊天页
                 [s9 openChatAndSendToTarget:target text:finalText completion:^(BOOL ok3) {
-                    if (!ok3) [s9 noteTargetFailed:target];
-                    advance();
+                    sendTextDone(ok3);
                 }];
             }];
         };
@@ -1092,6 +1091,27 @@ static NSString *SpDisplayName(NSDictionary *target) {
         } else {
             media = cNow.mediaOn && cNow.mediaFiles.count && cNow.mediaTpl;
         }
+
+        // 收尾:失败记补发;成功且开了"文本后附加媒体"就补一条,再推进
+        sendTextDone = ^(BOOL ok) {
+            typeof(self) sM = ws;
+            if (!sM) return;
+            if (!ok) [sM noteTargetFailed:target];
+            if (ok && media && !cNow.mediaInstead) {
+                NSString *pick2 = pickMedia();
+                if (pick2.length) {
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(6 * NSEC_PER_SEC)),
+                                   dispatch_get_main_queue(), ^{
+                        typeof(self) sN = ws;
+                        if (!sN) return;
+                        [sN sendMediaFile:pick2 audio:NO duration:0 target:target completion:^(BOOL ok2, NSString *e2) {
+                            if (!ok2) SparksLog(@"⚠️ 附加媒体失败:%@", e2);
+                        }];
+                    });
+                }
+            }
+            advance();
+        };
 
         if (tts) {
             [SparksTTSHelper synthesize:finalText voice:(tVoice.length ? tVoice : @"zh-CN") completion:^(NSString *path, double dur, NSString *err) {
@@ -1126,21 +1146,9 @@ static NSString *SpDisplayName(NSDictionary *target) {
             }];
             return;
         }
-        // 常规:文本优先;成功后按策略附加一条媒体
-        [s openChatAndSendToTarget:target text:finalText completion:^(BOOL ok) {
-            if (ok && media) {
-                NSString *pick = pickMedia();
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(6 * NSEC_PER_SEC)),
-                               dispatch_get_main_queue(), ^{
-                    typeof(self) s6 = ws;
-                    if (!s6) return;
-                    [s6 sendMediaFile:pick audio:NO duration:0 target:target completion:^(BOOL ok2, NSString *e2) {
-                        if (!ok2) SparksLog(@"⚠️ 附加媒体失败:%@", e2);
-                    }];
-                });
-            }
-            advance();
-        }];
+        // 常规:走完整免跳页链路(缓存会话 → IM 服务反查 → 语音/图片兜底 → 最后才可能开聊天页)
+        // 之前这里直接调 openChatAndSendToTarget:,把上面那套全绕过了 —— 这就是"怎么还是跳转"的根因
+        sendText();
     };
     if (fixedMode) {
         SparksLog(@"(独立文案模式,不走 AI)");
