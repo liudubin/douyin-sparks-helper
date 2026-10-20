@@ -2306,7 +2306,21 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
         [chipLabel.centerYAnchor constraintEqualToAnchor:chip.centerYAnchor],
         [title.trailingAnchor constraintLessThanOrEqualToAnchor:chip.leadingAnchor constant:-10],
     ]];
+
+    // 点卡片进入该目标的单独设置
+    objc_setAssociatedObject(card, "spKey", key, OBJC_ASSOCIATION_COPY_NONATOMIC);
+    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self
+                                                                        action:@selector(spTargetCardTapped:)];
+    [card addGestureRecognizer:tap];
+    card.userInteractionEnabled = YES;
     return card;
+}
+
+- (void)spTargetCardTapped:(UITapGestureRecognizer *)g {
+    NSString *key = objc_getAssociatedObject(g.view, "spKey");
+    if (!key.length) return;
+    self.detailKey = key;
+    [self scheduleRebuild];
 }
 
 - (void)buildTargetsTab {
@@ -2318,13 +2332,12 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
         return;
     }
 
-    // 目标页:每人一张卡 + 「管理目标」入口(v2.22.0 只有这一套)
+    // 目标页:每人一张卡(点卡进单独设置),下面接原有管理卡片
     if (cfg.targets.count) {
         for (NSDictionary *t in [cfg.targets copy]) {
             UIView *feedCard = [self spFeedCardForTarget:t];
             if (feedCard) [self.stack addArrangedSubview:feedCard];
         }
-        return;
     }
 
     SparksGlassCard *card = [[SparksGlassCard alloc]
