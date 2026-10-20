@@ -26,6 +26,11 @@
 /// 手动触发一次(面板按钮);force=YES 忽略今日已发去重
 - (void)runDailyNow:(BOOL)force;
 
+/// 免跳页发送:先用 IM 服务按 uid/cid 反查会话(移植自第三方插件的 AWEIMModuleService 用法),
+/// 拿到会话后走 AWEIMSendMessageController 直接投递。失败时调用方自行回退。
+- (void)sendTextViaIM:(NSString *)text target:(NSDictionary *)target
+           completion:(void (^)(BOOL ok))done;
+
 /// 只后台模式兜底:文本链路不通时改发语音/图片(媒体通道后台可用),不打开聊天页
 - (void)sendFallbackMediaForTarget:(NSDictionary *)target text:(NSString *)text
                         completion:(void (^)(BOOL ok))done;

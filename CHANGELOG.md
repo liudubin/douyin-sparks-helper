@@ -1,5 +1,21 @@
 # 抖音AI续火花助手 更新日志
 
+## v2.28.0 — 并入「抖音优化」的免跳页取会话能力 (2026-10-20)
+
+拆了 `抖音优化_28.59_34b1_无根.deb`(com.siwenjiajia.tweak)的 dylib,还原出它的续火花链路
+(详见 `docs/third-party-spark-port.md`):
+
+- 它**不打开聊天页**:先用 `AWEIMModuleService -checkAndCreateSingleConversationWithPeerUid:completion:`
+  按 uid 取/建单聊会话,再 `TIMXOConversation -sendMessage:isSaveDB:error:` 投递;
+- 我们这边缺的正好就是"没有聊天页时怎么拿到会话对象",投递链路(`AWEIMSendMessageController`)早已验证过。
+
+新增:
+- `-spModuleService`:依次尝试 `+sharedInstance/+sharedService/+defaultService/+service`,
+  再退到 `IESServiceManager/AWEEServiceManager +serviceWithProtocol:`,拿到即打 `✅ IM 模块服务取自 …`;
+- `-sendTextViaIM:target:completion:`:单聊用 `checkAndCreateSingleConversationWithPeerUid:`,
+  群聊用 `asyncGetConversationForIdentifier:`,回调切主线程写入会话缓存后复用原投递;
+- 发送链改为四级:缓存会话直接投 → IM 服务反查会话 → 语音/图片兜底(只后台模式)→ 打开聊天页。
+
 ## v2.27.1 — 全卡统一到 16pt 栅格 (2026-10-20)
 
 v2.26.2 只把「行内图标方块」去掉了,但**卡内 stack 自己还留了 14pt 缩进**,所以:

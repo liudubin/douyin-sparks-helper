@@ -1040,24 +1040,33 @@ static NSString *SpDisplayName(NSDictionary *target) {
         void (^sendText)(void) = ^{
             typeof(self) s4 = ws;
             if (!s4) return;
-            // 免跳页优先:有该会话的会话模型就直接投递,页面完全不动
+            // ① 已有缓存会话(开过聊天页/消息列表) → 直接投递,页面完全不动
             if ([s4 sendTextWithoutPage:finalText target:target]) {
                 advance();
                 return;
             }
-            if (s4.config.noJump) {
-                // 只后台发送:绝不打开聊天页;文本走不通就退到语音/图片
-                [s4 sendFallbackMediaForTarget:target text:finalText completion:^(BOOL ok) {
-                    typeof(self) s8 = ws;
-                    if (!s8) return;
-                    if (!ok) [s8 noteTargetFailed:target];
+            // ② 没缓存 → 用 IM 服务按 uid/cid 反查会话(移植自第三方插件),拿到同样免跳页
+            [s4 sendTextViaIM:finalText target:target completion:^(BOOL ok) {
+                typeof(self) s9 = ws;
+                if (!s9) return;
+                if (ok) {
+                    advance();
+                    return;
+                }
+                if (s9.config.noJump) {
+                    // ③ 只后台模式:绝不打开聊天页,退到语音/图片
+                    [s9 sendFallbackMediaForTarget:target text:finalText completion:^(BOOL ok2) {
+                        typeof(self) s10 = ws;
+                        if (!s10) return;
+                        if (!ok2) [s10 noteTargetFailed:target];
+                        advance();
+                    }];
+                    return;
+                }
+                [s9 openChatAndSendToTarget:target text:finalText completion:^(BOOL ok3) {
+                    if (!ok3) [s9 noteTargetFailed:target];
                     advance();
                 }];
-                return;
-            }
-            [s4 openChatAndSendToTarget:target text:finalText completion:^(BOOL ok) {
-                if (!ok) [s4 noteTargetFailed:target];   // 记进补发队列,稍后自动再来
-                advance();
             }];
         };
         // 随机挑一个媒体文件(目标级:锁定指定图优先,指定图并入随机池)
@@ -1556,6 +1565,107 @@ static NSString *SpDisplayName(NSDictionary *target) {
         [s closeTopChatPage];
         if (done) done(YES);
     });
+}
+
+#pragma mark - 免跳页直发(IM 服务层,移植自第三方插件的做法)
+
+// 目标:不打开聊天页也能拿到"目标会话对象"。
+// 第三方插件(抖音优化 28.59)在二进制里引用的是这套 IM 服务:
+//   AWEIMModuleService -checkAndCreateSingleConversationWithPeerUid:completion:
+//   AWEIMModuleService -asyncGetConversationForIdentifier:completion:
+//   TIMXOConversation  -sendMessage:isSaveDB:error:
+// 我们已经有"拿到会话就能直接投递"的 AWEIMSendMessageController 链路,
+// 所以这里只补前半段:按 uid / cid 反查会话。
+- (id)spModuleService {
+    static id cached;
+    static BOOL tried = NO;
+    if (tried) return cached;
+    tried = YES;
+    Class cls = NSClassFromString(@"AWEIMModuleService");
+    if (!cls) {
+        SparksLog(@"⚠️ 未找到 AWEIMModuleService,免跳页只能靠已缓存的会话");
+        return nil;
+    }
+    for (NSString *selName in @[@"sharedInstance", @"sharedService", @"defaultService", @"service"]) {
+        SEL s = NSSelectorFromString(selName);
+        if (![cls respondsToSelector:s]) continue;
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+        id v = [cls performSelector:s];
+#pragma clang diagnostic pop
+        if (v) {
+            SparksLog(@"✅ IM 模块服务取自 +%@", selName);
+            cached = v;
+            return v;
+        }
+    }
+    for (NSString *mgrName in @[@"IESServiceManager", @"AWEEServiceManager"]) {
+        Class mc = NSClassFromString(mgrName);
+        if (![mc respondsToSelector:NSSelectorFromString(@"sharedInstance")]) continue;
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+        id mgr = [mc performSelector:NSSelectorFromString(@"sharedInstance")];
+#pragma clang diagnostic pop
+        Protocol *proto = NSProtocolFromString(@"AWEIMModuleServiceProtocol");
+        if (!mgr || !proto) continue;
+        for (NSString *selName in @[@"serviceWithProtocol:", @"serviceForProtocol:"]) {
+            SEL s = NSSelectorFromString(selName);
+            if (![mgr respondsToSelector:s]) continue;
+            id v = ((id (*)(id, SEL, Protocol *))objc_msgSend)(mgr, s, proto);
+            if (v) {
+                SparksLog(@"✅ IM 模块服务取自 %@", mgrName);
+                cached = v;
+                return v;
+            }
+        }
+    }
+    SparksLog(@"⚠️ 拿不到 AWEIMModuleService 实例(版本差异),退回会话缓存");
+    return nil;
+}
+
+// 取目标会话:拿到后写进缓存,再复用 sendTextWithoutPage: 的投递逻辑
+- (void)sendTextViaIM:(NSString *)text target:(NSDictionary *)target
+           completion:(void (^)(BOOL ok))done {
+    NSString *key = SpTargetKey(target);
+    if (!key.length) { if (done) done(NO); return; }
+    id svc = [self spModuleService];
+    if (!svc) { if (done) done(NO); return; }
+
+    BOOL isGroup = SpTargetIsGroup(target);
+    __weak typeof(self) ws = self;
+    void (^useConv)(id) = ^(id conv) {
+        typeof(self) s = ws;
+        if (!s) { if (done) done(NO); return; }
+        if (!conv) {
+            SparksLog(@"⚠️ IM 服务没返回会话(%@),免跳页走不通", SpDisplayName(target));
+            if (done) done(NO);
+            return;
+        }
+        SparksLog(@"🧩 取到会话对象 %@ → %@", NSStringFromClass([conv class]), SpDisplayName(target));
+        @synchronized (s.conversations) {
+            if (s.conversations.count < 64) s.conversations[key] = conv;
+        }
+        BOOL ok = [s sendTextWithoutPage:text target:target];
+        if (done) done(ok);
+    };
+
+    if (!isGroup && [svc respondsToSelector:@selector(checkAndCreateSingleConversationWithPeerUid:completion:)]) {
+        ((void (*)(id, SEL, id, id))objc_msgSend)(svc,
+            @selector(checkAndCreateSingleConversationWithPeerUid:completion:),
+            key, ^(id conv, id err) {
+                dispatch_async(dispatch_get_main_queue(), ^{ useConv(conv); });
+            });
+        return;
+    }
+    if ([svc respondsToSelector:@selector(asyncGetConversationForIdentifier:completion:)]) {
+        ((void (*)(id, SEL, id, id))objc_msgSend)(svc,
+            @selector(asyncGetConversationForIdentifier:completion:),
+            key, ^(id conv, id err) {
+                dispatch_async(dispatch_get_main_queue(), ^{ useConv(conv); });
+            });
+        return;
+    }
+    if (done) done(NO);
 }
 
 #pragma mark - 免跳页直发
