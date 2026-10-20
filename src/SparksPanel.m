@@ -1336,10 +1336,11 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
 - (void)refreshLog;
 - (void)refreshChrome;
 - (void)spAnimateStackEntries;
+- (UIView *)spMakeConsoleActionBar;
+- (void)spBuildConsoleDashboard;
+- (void)spBuildConsoleQuickGrid;
+- (void)spQuickTileTapped:(UITapGestureRecognizer *)g;
 - (void)spBuildConsoleTab;
-- (void)spBuildConsoleMetrics;
-- (void)spBuildConsoleButton;
-- (void)spBuildConsoleOps;
 - (UIStackView *)spConsoleRow:(NSArray<UIView *> *)tiles;
 - (void)applyAvatarInto:(UIView *)avatar;
 - (void)applyPanelBackground;
@@ -2093,13 +2094,23 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
     if (dockBottom) {
         // dock 在底部:内容区从头部下方一直到 dock 上沿
         [scroll.topAnchor constraintEqualToAnchor:header.bottomAnchor constant:12].active = YES;
-        [scroll.bottomAnchor constraintEqualToAnchor:seg.topAnchor constant:-12].active = YES;
+        // 底部留出常驻操作条(46pt)+ 上下间距
+        [scroll.bottomAnchor constraintEqualToAnchor:seg.topAnchor constant:-70].active = YES;
     } else {
         [scroll.topAnchor constraintEqualToAnchor:seg.bottomAnchor constant:12].active = YES;
         [scroll.bottomAnchor constraintEqualToAnchor:root.bottomAnchor constant:-14].active = YES;
     }
     [scroll.leadingAnchor constraintEqualToAnchor:root.leadingAnchor constant:14].active = YES;
     [scroll.trailingAnchor constraintEqualToAnchor:root.trailingAnchor constant:-14].active = YES;
+
+    // v2.25:「立即续火花」改成浮在 dock 上方的常驻操作条,不随内容滚动
+    UIView *actionBar = [self spMakeConsoleActionBar];
+    [root addSubview:actionBar];
+    [NSLayoutConstraint activateConstraints:@[
+        [actionBar.leadingAnchor constraintEqualToAnchor:root.leadingAnchor constant:16],
+        [actionBar.trailingAnchor constraintEqualToAnchor:root.trailingAnchor constant:-16],
+        [actionBar.bottomAnchor constraintEqualToAnchor:seg.topAnchor constant:-12],
+    ]];
 
     UIStackView *stack = [[UIStackView alloc] init];
     stack.axis = UILayoutConstraintAxisVertical;
@@ -2212,58 +2223,214 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
 
 #pragma mark - 控制台风格首屏(v2.19.0)
 
-- (void)spBuildConsoleHeader {
+#pragma mark - 控制台状态页(整体重排)
+
+#pragma mark - 控制台状态页(v2.25 重排)
+
+// 新版排版:一块「仪表盘」(环形 + 关键信息 + 下方内联指标)+ 一块 2×2 快捷格
+// 主按钮不再挂在内容里,改成浮在 dock 上方的常驻操作条(见 buildPanelIfNeeded)
+- (void)spBuildConsoleTab {
+    [self spBuildConsoleDashboard];
+    [self spBuildConsoleQuickGrid];
+}
+
+- (void)spBuildConsoleDashboard {
     SparksConfig *cfg = [SparksConfig shared];
     SparksEngine *eng = [SparksEngine shared];
-
-    NSUInteger done = 0;
+    NSUInteger total = cfg.targets.count, done = 0;
     for (NSDictionary *t in cfg.targets) if ([cfg sentToday:SpTargetKeyOf(t)]) done++;
 
-    SparksGlassCard *head = [[SparksGlassCard alloc] initWithCardTitle:nil];
-    UIView *s = head.surface;
+    SparksGlassCard *card = [[SparksGlassCard alloc] initWithCardTitle:nil];
+    UIView *s = card.surface;
 
-    SparksRingGauge *gauge = [[SparksRingGauge alloc] initWithFrame:CGRectMake(0, 0, 96, 96)];
+    SparksRingGauge *gauge = [[SparksRingGauge alloc] initWithFrame:CGRectMake(0, 0, 92, 92)];
     gauge.translatesAutoresizingMaskIntoConstraints = NO;
     [s addSubview:gauge];
-    [NSLayoutConstraint activateConstraints:@[
-        [gauge.leadingAnchor constraintEqualToAnchor:s.leadingAnchor constant:16],
-        [gauge.topAnchor constraintEqualToAnchor:s.topAnchor constant:16],
-        [gauge.bottomAnchor constraintEqualToAnchor:s.bottomAnchor constant:-16],
-        [gauge.widthAnchor constraintEqualToConstant:96],
-        [gauge.heightAnchor constraintEqualToConstant:96],
-    ]];
-    [gauge setDone:done total:cfg.targets.count];
+    [gauge setDone:done total:total animated:YES];
 
     UILabel *next = [[UILabel alloc] init];
     next.text = [NSString stringWithFormat:@"下一轮 %@", SpFormatHM(cfg.todayEffectiveTime ?: cfg.dailyTime)];
-    next.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
-    next.textColor = SpArtTextColor();
+    next.font = [UIFont systemFontOfSize:17 weight:UIFontWeightBold];
+    next.textColor = [UIColor whiteColor];
     next.translatesAutoresizingMaskIntoConstraints = NO;
     [s addSubview:next];
 
-    UILabel *sub = SpMakeSubLabel([NSString stringWithFormat:@"间隔 %.2fs · %lu 个目标%@",
-        cfg.interval, (unsigned long)cfg.targets.count, eng.running ? @" · 执行中" : @" · 待命"]);
+    UILabel *sub = SpMakeSubLabel([NSString stringWithFormat:@"间隔 %.2f 秒 · %lu 个目标",
+        cfg.interval, (unsigned long)total]);
     [s addSubview:sub];
 
+    // 状态胶囊:执行中 = 主题色,待命 = 灰
+    UIView *pill = [[UIView alloc] init];
+    pill.translatesAutoresizingMaskIntoConstraints = NO;
+    pill.layer.cornerRadius = 9;
+    pill.layer.cornerCurve = kCACornerCurveContinuous;
+    pill.backgroundColor = eng.running ? [SpAccent() colorWithAlphaComponent:0.20]
+                                       : [UIColor colorWithWhite:1 alpha:0.10];
+    [s addSubview:pill];
+    UILabel *pillLabel = [[UILabel alloc] init];
+    pillLabel.text = eng.running ? @"执行中" : @"待命";
+    pillLabel.font = [UIFont systemFontOfSize:10 weight:UIFontWeightMedium];
+    pillLabel.textColor = eng.running ? SpAccent() : SpW(0.62);
+    pillLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [pill addSubview:pillLabel];
+
+    // 内联指标(不再是单独的 2×2 卡片)
+    UIView *line = [[UIView alloc] init];
+    line.translatesAutoresizingMaskIntoConstraints = NO;
+    line.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
+    [s addSubview:line];
+
+    UILabel *(^lbl)(NSString *, CGFloat, UIColor *) = ^UILabel *(NSString *text, CGFloat size, UIColor *color) {
+        UILabel *l = [[UILabel alloc] init];
+        l.text = text;
+        l.font = [UIFont systemFontOfSize:size];
+        l.textColor = color;
+        l.translatesAutoresizingMaskIntoConstraints = NO;
+        [s addSubview:l];
+        return l;
+    };
+    UILabel *k1 = lbl(@"今日已发", 11, SpW(0.55));
+    UILabel *v1 = lbl([NSString stringWithFormat:@"%lu/%lu", (unsigned long)done, (unsigned long)total],
+                      15, (total && done >= total) ? [UIColor systemGreenColor] : [UIColor whiteColor]);
+    UILabel *k2 = lbl(@"待发", 11, SpW(0.55));
+    UILabel *v2 = lbl([NSString stringWithFormat:@"%lu", (unsigned long)(total - done)], 15, SpAccent());
+
     [NSLayoutConstraint activateConstraints:@[
+        [gauge.leadingAnchor constraintEqualToAnchor:s.leadingAnchor constant:16],
+        [gauge.topAnchor constraintEqualToAnchor:s.topAnchor constant:16],
+        [gauge.widthAnchor constraintEqualToConstant:92],
+        [gauge.heightAnchor constraintEqualToConstant:92],
+
         [next.leadingAnchor constraintEqualToAnchor:gauge.trailingAnchor constant:16],
-        [next.topAnchor constraintEqualToAnchor:gauge.topAnchor constant:14],
+        [next.topAnchor constraintEqualToAnchor:gauge.topAnchor constant:6],
         [next.trailingAnchor constraintLessThanOrEqualToAnchor:s.trailingAnchor constant:-16],
+
         [sub.leadingAnchor constraintEqualToAnchor:next.leadingAnchor],
-        [sub.topAnchor constraintEqualToAnchor:next.bottomAnchor constant:4],
+        [sub.topAnchor constraintEqualToAnchor:next.bottomAnchor constant:5],
         [sub.trailingAnchor constraintLessThanOrEqualToAnchor:s.trailingAnchor constant:-16],
+
+        [pill.leadingAnchor constraintEqualToAnchor:next.leadingAnchor],
+        [pill.topAnchor constraintEqualToAnchor:sub.bottomAnchor constant:8],
+        [pill.heightAnchor constraintEqualToConstant:18],
+        [pillLabel.centerXAnchor constraintEqualToAnchor:pill.centerXAnchor],
+        [pillLabel.centerYAnchor constraintEqualToAnchor:pill.centerYAnchor],
+        [pillLabel.leadingAnchor constraintGreaterThanOrEqualToAnchor:pill.leadingAnchor constant:8],
+        [pillLabel.trailingAnchor constraintLessThanOrEqualToAnchor:pill.trailingAnchor constant:-8],
+
+        [line.leadingAnchor constraintEqualToAnchor:s.leadingAnchor constant:16],
+        [line.trailingAnchor constraintEqualToAnchor:s.trailingAnchor constant:-16],
+        [line.topAnchor constraintEqualToAnchor:gauge.bottomAnchor constant:14],
+        [line.heightAnchor constraintEqualToConstant:0.5],
+
+        [k1.leadingAnchor constraintEqualToAnchor:s.leadingAnchor constant:16],
+        [k1.topAnchor constraintEqualToAnchor:line.bottomAnchor constant:12],
+        [v1.leadingAnchor constraintEqualToAnchor:k1.leadingAnchor],
+        [v1.topAnchor constraintEqualToAnchor:k1.bottomAnchor constant:2],
+        [v1.bottomAnchor constraintEqualToAnchor:s.bottomAnchor constant:-14],
+
+        [k2.leadingAnchor constraintEqualToAnchor:v1.trailingAnchor constant:44],
+        [k2.topAnchor constraintEqualToAnchor:k1.topAnchor],
+        [v2.leadingAnchor constraintEqualToAnchor:k2.leadingAnchor],
+        [v2.topAnchor constraintEqualToAnchor:v1.topAnchor],
     ]];
-    [self.stack addArrangedSubview:head];
+
+    [self.stack addArrangedSubview:card];
 }
 
-#pragma mark - 控制台状态页(整体重排)
+// 2×2 快捷格:总开关 / 目标 / 定时 / 日志
+- (void)spBuildConsoleQuickGrid {
+    SparksConfig *cfg = [SparksConfig shared];
+    SparksGlassCard *card = [[SparksGlassCard alloc] initWithCardTitle:nil];
+    UIView *s = card.surface;
 
-- (void)spBuildConsoleTab {
-    [self spBuildConsoleHeader];    // 环形进度 + 下一轮 + 间隔
-    [self spBuildConsoleMetrics];   // 2×2 指标砖
-    [self spBuildConsoleButton];    // 主按钮
-    [self spBuildConsoleOps];       // 紧凑操作行
+    UIView *(^tile)(NSString *, NSString *, NSString *, NSInteger) =
+    ^UIView *(NSString *icon, NSString *title, NSString *value, NSInteger tag) {
+        UIView *box = [[UIView alloc] init];
+        box.translatesAutoresizingMaskIntoConstraints = NO;
+        box.tag = tag;
+        box.userInteractionEnabled = YES;
+        [box addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self
+                                                                        action:@selector(spQuickTileTapped:)]];
+        UIImageView *iv = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:icon]];
+        iv.tintColor = SpAccent();
+        iv.contentMode = UIViewContentModeScaleAspectFit;
+        iv.translatesAutoresizingMaskIntoConstraints = NO;
+        [box addSubview:iv];
+        UILabel *t = [[UILabel alloc] init];
+        t.text = title;
+        t.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+        t.textColor = [UIColor whiteColor];
+        t.translatesAutoresizingMaskIntoConstraints = NO;
+        [box addSubview:t];
+        UILabel *v = [[UILabel alloc] init];
+        v.text = value;
+        v.font = [UIFont systemFontOfSize:11];
+        v.textColor = SpW(0.6);
+        v.translatesAutoresizingMaskIntoConstraints = NO;
+        [box addSubview:v];
+        [NSLayoutConstraint activateConstraints:@[
+            [iv.leadingAnchor constraintEqualToAnchor:box.leadingAnchor constant:14],
+            [iv.topAnchor constraintEqualToAnchor:box.topAnchor constant:13],
+            [iv.widthAnchor constraintEqualToConstant:16],
+            [iv.heightAnchor constraintEqualToConstant:16],
+            [t.leadingAnchor constraintEqualToAnchor:iv.trailingAnchor constant:8],
+            [t.centerYAnchor constraintEqualToAnchor:iv.centerYAnchor],
+            [t.trailingAnchor constraintLessThanOrEqualToAnchor:box.trailingAnchor constant:-10],
+            [v.leadingAnchor constraintEqualToAnchor:iv.leadingAnchor],
+            [v.topAnchor constraintEqualToAnchor:iv.bottomAnchor constant:5],
+            [v.bottomAnchor constraintEqualToAnchor:box.bottomAnchor constant:-12],
+        ]];
+        return box;
+    };
+
+    UIView *t0 = tile(@"power", @"总开关", cfg.master ? @"已开启" : @"已关闭", 0);
+    UIView *t1 = tile(@"person.2.fill", @"目标", [NSString stringWithFormat:@"%lu 个", (unsigned long)cfg.targets.count], 1);
+    UIView *t2 = tile(@"clock.fill", @"定时", SpFormatHM(cfg.todayEffectiveTime ?: cfg.dailyTime), 2);
+    UIView *t3 = tile(@"list.bullet.rectangle", @"日志", @"查看", 3);
+
+    UIStackView *r1 = [[UIStackView alloc] initWithArrangedSubviews:@[t0, t1]];
+    UIStackView *r2 = [[UIStackView alloc] initWithArrangedSubviews:@[t2, t3]];
+    for (UIStackView *row in @[r1, r2]) {
+        row.axis = UILayoutConstraintAxisHorizontal;
+        row.distribution = UIStackViewDistributionFillEqually;
+        row.spacing = 10;
+        row.translatesAutoresizingMaskIntoConstraints = NO;
+    }
+    UIView *hline = [[UIView alloc] init];
+    hline.translatesAutoresizingMaskIntoConstraints = NO;
+    hline.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
+
+    UIStackView *grid = [[UIStackView alloc] initWithArrangedSubviews:@[r1, hline, r2]];
+    grid.axis = UILayoutConstraintAxisVertical;
+    grid.spacing = 0;
+    grid.translatesAutoresizingMaskIntoConstraints = NO;
+    [s addSubview:grid];
+    [NSLayoutConstraint activateConstraints:@[
+        [grid.leadingAnchor constraintEqualToAnchor:s.leadingAnchor constant:6],
+        [grid.trailingAnchor constraintEqualToAnchor:s.trailingAnchor constant:-6],
+        [grid.topAnchor constraintEqualToAnchor:s.topAnchor constant:4],
+        [grid.bottomAnchor constraintEqualToAnchor:s.bottomAnchor constant:-4],
+        [hline.heightAnchor constraintEqualToConstant:0.5],
+    ]];
+    [self.stack addArrangedSubview:card];
 }
+
+- (void)spQuickTileTapped:(UITapGestureRecognizer *)g {
+    SparksConfig *cfg = [SparksConfig shared];
+    switch (g.view.tag) {
+        case 0: {
+            cfg.master = !cfg.master;
+            [cfg save];
+            SparksLog(@"总开关:%@", cfg.master ? @"开" : @"关");
+            [self scheduleRebuild];
+            break;
+        }
+        case 1: [self segChangedTo:1]; break;
+        case 3: [self segChangedTo:4]; break;
+        default: [self segChangedTo:3]; break;
+    }
+}
+
 
 - (UIStackView *)spConsoleRow:(NSArray<UIView *> *)tiles {
     UIStackView *row = [[UIStackView alloc] initWithArrangedSubviews:tiles];
@@ -2273,65 +2440,7 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
     return row;
 }
 
-- (void)spBuildConsoleMetrics {
-    SparksConfig *cfg = [SparksConfig shared];
-    NSUInteger total = cfg.targets.count, done = 0;
-    for (NSDictionary *t in cfg.targets) if ([cfg sentToday:SpTargetKeyOf(t)]) done++;
-
-    SparksGlassCard *card = [[SparksGlassCard alloc] initWithCardTitle:nil];
-    UIView *s = card.surface;
-
-    UIView *(^tile)(NSString *, NSString *, UIColor *) = ^UIView *(NSString *title, NSString *value, UIColor *vc) {
-        UIView *box = [[UIView alloc] init];
-        box.translatesAutoresizingMaskIntoConstraints = NO;
-        UILabel *t = [[UILabel alloc] init];
-        t.text = title;
-        t.font = [UIFont systemFontOfSize:11];
-        t.textColor = SpW(0.55);
-        t.translatesAutoresizingMaskIntoConstraints = NO;
-        UILabel *v = [[UILabel alloc] init];
-        v.text = value;
-        v.font = SpRounded(20, 0.6);
-        v.textColor = vc;
-        v.translatesAutoresizingMaskIntoConstraints = NO;
-        [box addSubview:t];
-        [box addSubview:v];
-        [NSLayoutConstraint activateConstraints:@[
-            [t.leadingAnchor constraintEqualToAnchor:box.leadingAnchor],
-            [t.topAnchor constraintEqualToAnchor:box.topAnchor],
-            [v.leadingAnchor constraintEqualToAnchor:box.leadingAnchor],
-            [v.topAnchor constraintEqualToAnchor:t.bottomAnchor constant:4],
-            [v.bottomAnchor constraintEqualToAnchor:box.bottomAnchor],
-        ]];
-        return box;
-    };
-
-    UIColor *doneColor = (total && done >= total) ? [UIColor systemGreenColor] : [UIColor whiteColor];
-    UIStackView *r1 = [self spConsoleRow:@[
-        tile(@"今日已发", [NSString stringWithFormat:@"%lu/%lu", (unsigned long)done, (unsigned long)total], doneColor),
-        tile(@"待发", [NSString stringWithFormat:@"%lu", (unsigned long)(total - done)], SpAccent()),
-    ]];
-    UIStackView *r2 = [self spConsoleRow:@[
-        tile(@"下一轮", SpFormatHM(cfg.todayEffectiveTime ?: cfg.dailyTime), [UIColor whiteColor]),
-        tile(@"发送间隔", [NSString stringWithFormat:@"%.2fs", cfg.interval], [UIColor whiteColor]),
-    ]];
-    r1.translatesAutoresizingMaskIntoConstraints = NO;
-    r2.translatesAutoresizingMaskIntoConstraints = NO;
-    UIStackView *grid = [[UIStackView alloc] initWithArrangedSubviews:@[r1, r2]];
-    grid.axis = UILayoutConstraintAxisVertical;
-    grid.spacing = 14;
-    grid.translatesAutoresizingMaskIntoConstraints = NO;
-    [s addSubview:grid];
-    [NSLayoutConstraint activateConstraints:@[
-        [grid.leadingAnchor constraintEqualToAnchor:s.leadingAnchor constant:16],
-        [grid.trailingAnchor constraintEqualToAnchor:s.trailingAnchor constant:-16],
-        [grid.topAnchor constraintEqualToAnchor:s.topAnchor constant:14],
-        [grid.bottomAnchor constraintEqualToAnchor:s.bottomAnchor constant:-14],
-    ]];
-    [self.stack addArrangedSubview:card];
-}
-
-- (void)spBuildConsoleButton {
+- (UIView *)spMakeConsoleActionBar {
     __weak typeof(self) ws = self;
     SparksCapsuleButton *go = [[SparksCapsuleButton alloc] initWithTitle:@"立即续火花" icon:@"flame.fill" primary:YES];
     // 容器负责撑满一行;按钮自己用宽度约束,收缩时居中变圆
@@ -2365,38 +2474,7 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
             [s3 scheduleRebuild];
         });
     };
-    [self.stack addArrangedSubview:wrap];
-}
-
-- (void)spBuildConsoleOps {
-    SparksConfig *cfg = [SparksConfig shared];
-    __weak typeof(self) ws = self;
-    SparksGlassCard *ops = [[SparksGlassCard alloc] initWithCardTitle:nil];
-    [ops addRow:[SparksInfoRow switchWithTitle:@"总开关" on:cfg.master onChange:^(BOOL on) {
-        SparksConfig *c = [SparksConfig shared];
-        c.master = on;
-        [c save];
-        SparksLog(@"总开关:%@", on ? @"开" : @"关");
-        typeof(self) s = ws;
-        if (s) dispatch_async(dispatch_get_main_queue(), ^{ [s scheduleRebuild]; });
-    }]];
-    [ops addRow:SpRowSeparator()];
-    [ops addRow:[SparksInfoRow actionWithTitle:@"目标"
-                                        value:[NSString stringWithFormat:@"%lu 个", (unsigned long)cfg.targets.count]
-                                        onTap:^{
-        typeof(self) s = ws;
-        if (s) [s segChangedTo:1];
-    }]];
-    [ops addRow:SpRowSeparator()];
-    [ops addRow:[SparksInfoRow actionWithTitle:@"定时"
-                                        value:SpFormatHM(cfg.todayEffectiveTime ?: cfg.dailyTime)
-                                        onTap:^{
-        typeof(self) s = ws;
-        if (s) [s segChangedTo:3];
-    }]];
-    [ops addRow:SpRowSeparator()];
-    [ops addRow:[SparksInfoRow infoWithTitle:@"发送方式" value:@"免跳页直发"]];
-    [self.stack addArrangedSubview:ops];
+    return wrap;
 }
 
 #pragma mark - 目标卡片流(v2.19.0)
