@@ -336,7 +336,6 @@ static CGFloat SpCardRadius(void) { return 20; }
 static UIColor *SpCardFill(void)  { return [UIColor colorWithWhite:0.09 alpha:0.94]; }
 static UIColor *SpCardStroke(void){ return [UIColor colorWithWhite:1 alpha:0.12]; }
 static UIColor *SpArtTitleColor(void) { return SpW(0.55); }
-static UIColor *SpArtTextColor(void)  { return [UIColor whiteColor]; }
 
 #pragma mark - 环形进度(控制台风格首屏)
 
