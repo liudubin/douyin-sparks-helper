@@ -1727,33 +1727,46 @@ static UIView *spAddRowTile(UIView *row, NSString *title) {
 
 #pragma mark - 内容构建(合并刷新,输入中跳过)
 
+// 重建面板骨架(尺寸/背景/材质/主题色这类改动要换外壳)。
+// v2.26.1:改成**原地重建** —— 旧实现是 closePanel 等动画再 openPanel,
+// 用户改个设置就看到面板自己关掉再弹回来,体感极差。
 - (void)refreshChrome {
     BOOL wasOpen = self.panelRoot.superview != nil;
     [self.logTimer invalidate];
     self.logTimer = nil;
-    // 重建必须等关闭动画走完(动画时长随开合速率变化),否则新旧面板交接出竞态
-    CGFloat d = 0.2 / MAX(0.3, [SparksConfig shared].animSpeed) + 0.15;
-    [self closePanel];
-    __weak typeof(self) ws = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(d * NSEC_PER_SEC)),
-                   dispatch_get_main_queue(), ^{
-        typeof(self) s = ws;
-        if (!s) return;
-        s.panelRoot = nil;
-        s.seg = nil;
-        s.scroll = nil;
-        s.stack = nil;
-        s.logTextView = nil;
-        s.panelBackdropView = nil;
-        s.panelBgView = nil;
-        s.panelDimView = nil;
-        s.toastView = nil;
-        s.toastLabel = nil;
-        s.lastSig = nil;   // 骨架已重建,签名必须失效,否则重开后内容区空白
-        [s applyBallIcon];
-        // 重开守卫:等待期间用户主动关了面板(球已恢复显示)就不再弹回
-        if (wasOpen && s.ballWrapper.hidden) [s openPanel];
-    });
+    [self applyBallIcon];
+
+    // 记住当前视觉状态,重建后原样恢复
+    UIView *oldRoot = self.panelRoot;
+    CGFloat keepAlpha = oldRoot ? oldRoot.alpha : 1;
+    CGAffineTransform keepTf = oldRoot ? oldRoot.transform : CGAffineTransformIdentity;
+    CGPoint keepCenter = oldRoot ? oldRoot.center : CGPointZero;
+
+    [oldRoot removeFromSuperview];
+    self.panelRoot = nil;
+    self.seg = nil;
+    self.scroll = nil;
+    self.stack = nil;
+    self.logTextView = nil;
+    self.panelBackdropView = nil;
+    self.panelBgView = nil;
+    self.panelDimView = nil;
+    self.toastView = nil;
+    self.toastLabel = nil;
+    self.lastSig = nil;   // 骨架已重建,签名必须失效,否则内容区空白
+
+    if (!wasOpen) return;   // 面板没开:作废骨架,下次打开时重建
+
+    [self buildPanelIfNeeded];
+    UIView *root = self.panelRoot;
+    if (!root) return;
+    root.alpha = keepAlpha;
+    root.transform = keepTf;
+    if (!CGPointEqualToPoint(keepCenter, CGPointZero)) root.center = keepCenter;
+    [self.panelWindow.rootViewController.view addSubview:root];
+    self.ballWrapper.hidden = YES;
+    self.animateNextBuild = YES;   // 换骨架后内容轻量重入,盖掉瞬间的空白
+    [self rebuildContent];
 }
 
 - (void)applyAvatarInto:(UIView *)avatar {
